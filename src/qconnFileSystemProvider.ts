@@ -15,113 +15,112 @@ function toFileType(flags: number): vscode.FileType {
 }
 
 function hostOf(authority: string): string {
-    return authority.split(":")[0];
+	return authority.split(":")[0];
 }
 
 function portOf(authority: string): number {
 	const parts = authority.split(":");
 	if (parts.length === 2) {
-        try {
-            return parseInt(parts[1]);
-        } catch {
-            throw new Error(`Authority has invalid port part: ${authority}`);
-        }
+		try {
+			return parseInt(parts[1]);
+		} catch {
+			throw new Error(`Authority has invalid port part: ${authority}`);
+		}
 	} else {
-        return 8000; // No port part. Assume default port
+		return 8000; // No port part. Assume default port
 	}
 }
 
 // Used to make sure that only one operation is performed at a time on a given service
 interface SynchronizedService {
-    service: fileservice.FileService;
-    mutex: Mutex;
+	service: fileservice.FileService;
+	mutex: Mutex;
 }
 
 export class QConnFileSystemProvider implements vscode.FileSystemProvider {
-    // Holds a map from an authority to a service and a mutex to synchronize access to it
-    private services: Map<string, SynchronizedService> = new Map();
+	// Holds a map from an authority to a service and a mutex to synchronize access to it
+	private services: Map<string, SynchronizedService> = new Map();
 
-    // Gets a service for a given authority, creating it if it doesn't exist
-    async getService(authority: string): Promise<SynchronizedService> {
-        const service = this.services.get(authority);
-        if (service === undefined) {
-            const mutex = new Mutex();
-            const service = await fileservice.FileService.connect(hostOf(authority), portOf(authority));
-            this.services.set(authority, {service, mutex});
-            return {service, mutex};
-        }
-        return service;
-    }
+	// Gets a service for a given authority, creating it if it doesn't exist
+	async getService(authority: string): Promise<SynchronizedService> {
+		const service = this.services.get(authority);
+		if (service === undefined) {
+			const mutex = new Mutex();
+			const service = await fileservice.FileService.connect(hostOf(authority), portOf(authority));
+			this.services.set(authority, { service, mutex });
+			return { service, mutex };
+		}
+		return service;
+	}
 
-	stat(uri: vscode.Uri): Thenable<vscode.FileStat> {
-		return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-			    try {
-                    const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
-    				const stat = await service.stat(fd);
-                    await service.close(fd);
-    				resolve({
-    					type: toFileType(stat.mode),
-    					ctime: stat.ctime * 1000,
-    					mtime: stat.mtime * 1000,
-    					size: stat.size
-    				});
-    			} catch (error: any) {
-					reject(error);
-    			}
-            });
+	async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
+		const syncService = await this.getService(uri.authority);
+		const service = syncService.service;
+		return syncService.mutex.runExclusive(async () => {
+			try {
+				const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
+				const stat = await service.stat(fd);
+				await service.close(fd);
+				return {
+					type: toFileType(stat.mode),
+					ctime: stat.ctime * 1000,
+					mtime: stat.mtime * 1000,
+					size: stat.size
+				};
+			}
+			catch (error: any) {
+				throw vscode.FileSystemError.FileNotFound(uri);
+			}
 		});
 	}
 
 	readDirectory(uri: vscode.Uri): Thenable<[string, vscode.FileType][]> {
 		return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-                try {
-				    const fileNames = await service.list(uri.path);
-                    let fileInfo: [string, vscode.FileType][] = [];
-                    for (const fileName of fileNames) {
-                        const fd = await service.open(uri.path + "/" + fileName, fileservice.OpenFlags.O_RDONLY);
-                        const stat = await service.stat(fd);
-                        await service.close(fd);
-                        fileInfo.push([fileName, toFileType(stat.mode)]);
-                    }
-				    resolve(fileInfo);
-			    }
-			    catch (error: any) {
-    				reject(error);
-				    if (error.message === "No such file or directory") {
-    					return; //throw vscode.FileSystemError.FileNotFound(uri);
-				    }
-			    }
-		    });
-        });
+			const syncService = await this.getService(uri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
+				try {
+					const fileNames = await service.list(uri.path);
+					let fileInfo: [string, vscode.FileType][] = [];
+					for (const fileName of fileNames) {
+						const fd = await service.open(uri.path + "/" + fileName, fileservice.OpenFlags.O_RDONLY);
+						const stat = await service.stat(fd);
+						await service.close(fd);
+						fileInfo.push([fileName, toFileType(stat.mode)]);
+					}
+					resolve(fileInfo);
+				}
+				catch (error: any) {
+					reject(error);
+					if (error.message === "No such file or directory") {
+						return; //throw vscode.FileSystemError.FileNotFound(uri);
+					}
+				}
+			});
+		});
 	}
 
 	readFile(uri: vscode.Uri): Thenable<Uint8Array> {
-        return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-                try {
-                    const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
-                    try {
-    				    const data = await service.readAll(fd);
-                        resolve(data);
-                    } finally {
-                        await service.close(fd);
-                    }
-    			} catch (error: any) {
-    				reject(error);
-    				if (error.message === "No such file or directory") {
-    					return; //throw vscode.FileSystemError.FileNotFound(uri);
-    				}
-    			}
-    		});
-        });
+		return new Promise(async (resolve, reject) => {
+			const syncService = await this.getService(uri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
+				try {
+					const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
+					try {
+						const data = await service.readAll(fd);
+						resolve(data);
+					} finally {
+						await service.close(fd);
+					}
+				} catch (error: any) {
+					reject(error);
+					if (error.message === "No such file or directory") {
+						return; //throw vscode.FileSystemError.FileNotFound(uri);
+					}
+				}
+			});
+		});
 	}
 
 	/**
@@ -137,39 +136,39 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	 */
 	writeFile(uri: vscode.Uri, content: Uint8Array, options: { create: boolean, overwrite: boolean }): Thenable<void> {
 		return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-                const defaultPermissions = fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR;
+			const syncService = await this.getService(uri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
+				const defaultPermissions = fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR;
 				if (await this.fileExists(service, uri.path)) {
-    				// File exists
-    				if (options.create && !options.overwrite) {
-    					reject(`${uri} exists and overwrite is not set`);
-    					return; //throw vscode.FileSystemError.FileExists(uri);
-    				}
+					// File exists
+					if (options.create && !options.overwrite) {
+						reject(`${uri} exists and overwrite is not set`);
+						return; //throw vscode.FileSystemError.FileExists(uri);
+					}
 
-                    const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.overwrite ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
-                    try {
-                        await service.write(fd, Buffer.from(content));
-                    } finally {
-                        await service.close(fd);
-                    }
+					const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.overwrite ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
+					try {
+						await service.write(fd, Buffer.from(content));
+					} finally {
+						await service.close(fd);
+					}
 					resolve();
-    			} else {
-    				if (!options.create) {
-    					reject(`${uri} doesn't exist, and create is not set`);
-    					return; //throw vscode.FileSystemError.FileNotFound(uri);
-    				}
-                    const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.create ? fileservice.OpenFlags.O_CREAT : 0)| (options.create ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
-                    try {
-                        await service.write(fd, Buffer.from(content));
-                    } finally {
-                        await service.close(fd);
-                    }
- 					resolve();
-    			};
-    		});
-        });
+				} else {
+					if (!options.create) {
+						reject(`${uri} doesn't exist, and create is not set`);
+						return; //throw vscode.FileSystemError.FileNotFound(uri);
+					}
+					const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.create ? fileservice.OpenFlags.O_CREAT : 0) | (options.create ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
+					try {
+						await service.write(fd, Buffer.from(content));
+					} finally {
+						await service.close(fd);
+					}
+					resolve();
+				};
+			});
+		});
 	}
 
 
@@ -195,34 +194,34 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	 * @throws {@linkcode FileSystemError.NoPermissions NoPermissions} when permissions aren't sufficient.
 	 */
 	rename(oldUri: vscode.Uri, newUri: vscode.Uri, options: { overwrite: boolean }): Thenable<void> {
-        return new Promise(async (resolve, reject) => {
-            if (oldUri.authority !== newUri.authority) {
-                reject("Files must recide on same host");
-                return;
-            }
+		return new Promise(async (resolve, reject) => {
+			if (oldUri.authority !== newUri.authority) {
+				reject("Files must recide on same host");
+				return;
+			}
 
-            const syncService = await this.getService(oldUri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
+			const syncService = await this.getService(oldUri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
 				if (await this.fileExists(service, newUri.path)) {
-		    		// Target file exists
-		    		if (!options.overwrite) {
-		    			reject(`${newUri} already exists, and overwrite is not set`);
-		    			return; //throw vscode.FileSystemError.FileExists(newUri);
-		    		} else {
-		    			try {
-			    			await service.delete(newUri.path);
-		    			} catch (error) {
-			    			reject(`Unable to delete target file ${newUri}: ${error}`);
-		    				return; //throw vscode.FileSystemError.FileExists(newUri);
-		    			}
-		    		}
+					// Target file exists
+					if (!options.overwrite) {
+						reject(`${newUri} already exists, and overwrite is not set`);
+						return; //throw vscode.FileSystemError.FileExists(newUri);
+					} else {
+						try {
+							await service.delete(newUri.path);
+						} catch (error) {
+							reject(`Unable to delete target file ${newUri}: ${error}`);
+							return; //throw vscode.FileSystemError.FileExists(newUri);
+						}
+					}
 				} else {
-                    service.move(oldUri.path, newUri.path);
-			    	resolve();
-			    }
-		    });
-        });
+					service.move(oldUri.path, newUri.path);
+					resolve();
+				}
+			});
+		});
 	}
 
 	/**
@@ -235,21 +234,21 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	 */
 	delete(uri: vscode.Uri): Thenable<void> {
 		return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-                try {
-				    await service.delete(uri.path);
-				    resolve();
-			    }
-			    catch (error: any) {
-				    reject(error);
-				    if (error.message === "No such file or directory") {
-					    return; //throw vscode.FileSystemError.FileNotFound(uri);
-				    }
-			    }
-		    });
-        });
+			const syncService = await this.getService(uri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
+				try {
+					await service.delete(uri.path);
+					resolve();
+				}
+				catch (error: any) {
+					reject(error);
+					if (error.message === "No such file or directory") {
+						return; //throw vscode.FileSystemError.FileNotFound(uri);
+					}
+				}
+			});
+		});
 	}
 
 	/**
@@ -262,20 +261,20 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	 */
 	createDirectory(uri: vscode.Uri): Thenable<void> {
 		return new Promise(async (resolve, reject) => {
-            const syncService = await this.getService(uri.authority);
-            const service = syncService.service;
-            syncService.mutex.runExclusive(async () => {
-                try {
-				    await service.open(uri.path, fileservice.OpenFlags.O_CREAT | fileservice.OpenFlags.O_WRONLY, fileservice.Permissions.S_IFDIR | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR | fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IWGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IWOTH);
-				    resolve();
-			    } catch (error: any) {
-				    reject(error);
-				    if (error.message === "No such file or directory") {
-					    return; // TODO: Why not throw vscode.FileSystemError.FileNotFound(uri);
-				    }
-			    }
-		    });
-        });
+			const syncService = await this.getService(uri.authority);
+			const service = syncService.service;
+			syncService.mutex.runExclusive(async () => {
+				try {
+					await service.open(uri.path, fileservice.OpenFlags.O_CREAT | fileservice.OpenFlags.O_WRONLY, fileservice.Permissions.S_IFDIR | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR | fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IWGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IWOTH);
+					resolve();
+				} catch (error: any) {
+					reject(error);
+					if (error.message === "No such file or directory") {
+						return; // TODO: Why not throw vscode.FileSystemError.FileNotFound(uri);
+					}
+				}
+			});
+		});
 	}
 
 	private _emitter = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
