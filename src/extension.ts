@@ -7,8 +7,8 @@ import { createQConnTerminal } from './qconnTerminal';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
-const qnxTargetHost = vscode.workspace.getConfiguration("Qconn").get<string>("target.host", "192.168.203.128");
-const qnxTargetPort = vscode.workspace.getConfiguration("Qconn").get<number>("target.port", 8000);
+const qnxTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "192.168.203.128");
+const qnxTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
 
 let treeView: vscode.TreeView<processListProvider.Process>;
 let treeDataProvider = new processListProvider.ProcessListProvider(qnxTargetHost, qnxTargetPort);

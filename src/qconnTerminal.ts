@@ -101,10 +101,13 @@ class PacketizedSocket {
 
 export async function createQConnTerminal(host: string, port: number) {
     const writeEmitter = new vscode.EventEmitter<string>();
+    const onDidClose = new vscode.EventEmitter<number>();
     const socket = net.createConnection({ host: host, port: port }, () => {
         const pty = {
             onDidWrite: writeEmitter.event,
+            onDidClose: onDidClose.event,
             open: async () => {
+                writeEmitter.fire(`Connecting to ${host}...\r\n`);
                 var client = new PacketizedSocket(socket);
                 await client.read("QCONN\r\n");
                 await client.read(Buffer.from([0xff, 0xfd, 0x22]));
@@ -118,6 +121,7 @@ export async function createQConnTerminal(host: string, port: number) {
                 });
                 socket.on("close", () => {
                     writeEmitter.fire("Remote side closed the connection\r\n");
+                    onDidClose.fire(0);
                 });
             },
             close: () => {
