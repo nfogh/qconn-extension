@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import * as qconn from 'qconn';
-import * as cntlservice from 'qconn/out/cntlservice';
+import { CntlService, SignalType, getPids } from 'qconn';
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal } from './qconnTerminal';
@@ -20,7 +19,7 @@ function log(message: string) {
 
 async function pickTargetPID(host: string, port: number): Promise<number | undefined> {
 	try {
-		const processes = await qconn.getPids(host, port);
+		const processes = await getPids(host, port);
 		var pids: vscode.QuickPickItem[] = [];
 		for (const [pid, info] of processes) {
 			pids.push({ label: pid.toString(), description: info.path });
@@ -47,8 +46,8 @@ async function kill(process: processListProvider.Process | undefined) {
 	const pid = process ? process.pid : await pickTargetPID(qnxTargetHost, qnxTargetPort);
 	if (pid !== undefined) {
 		log(`Sending SIGKILL to pid ${pid}`);
-		const service = await cntlservice.CntlService.connect(qnxTargetHost, qnxTargetPort);
-		await service.signalProcess(pid, cntlservice.SignalType.kill);
+		const service = await CntlService.connect(qnxTargetHost, qnxTargetPort);
+		await service.signalProcess(pid, SignalType.kill);
 		await service.disconnect();
 	}
 }

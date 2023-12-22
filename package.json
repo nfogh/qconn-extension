@@ -43,7 +43,6 @@
         "command": "qconn.createQNXTerminal",
         "title": "Create QNX Terminal"
       }
-
     ],
     "views": {
       "explorer": [
@@ -82,6 +81,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-    "async-mutex": "^0.4.0"
+    "async-mutex": "^0.4.0",
+    "qconn": "^1.0.3"
   }
 }

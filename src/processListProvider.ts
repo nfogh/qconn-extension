@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SInfoService } from 'qconn/out/sinfoservice';
+import { SInfoService } from 'qconn';
 
 export class ProcessListProvider implements vscode.TreeDataProvider<Process>
 {

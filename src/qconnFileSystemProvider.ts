@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
-import * as fileservice from 'qconn/out/fileservice';
+import { FileService, Permissions, OpenFlags } from 'qconn';
 import { Mutex } from 'async-mutex';
 
 function toFileType(flags: number): vscode.FileType {
-	if ((flags & fileservice.Permissions.S_IFMT) === fileservice.Permissions.S_IFDIR) {
+	if ((flags & Permissions.S_IFMT) === Permissions.S_IFDIR) {
 		return vscode.FileType.Directory;
-	} else if ((flags & fileservice.Permissions.S_IFMT) === fileservice.Permissions.S_IFLNK) {
+	} else if ((flags & Permissions.S_IFMT) === Permissions.S_IFLNK) {
 		return vscode.FileType.SymbolicLink;
-	} else if ((flags & fileservice.Permissions.S_IFMT) === fileservice.Permissions.S_IFREG) {
+	} else if ((flags & Permissions.S_IFMT) === Permissions.S_IFREG) {
 		return vscode.FileType.File;
 	} else {
 		return vscode.FileType.Unknown;
@@ -33,7 +33,7 @@ function portOf(authority: string): number {
 
 // Used to make sure that only one operation is performed at a time on a given service
 interface SynchronizedService {
-	service: fileservice.FileService;
+	service: FileService;
 	mutex: Mutex;
 }
 
@@ -46,7 +46,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const service = this.services.get(authority);
 		if (service === undefined) {
 			const mutex = new Mutex();
-			const service = await fileservice.FileService.connect(hostOf(authority), portOf(authority));
+			const service = await FileService.connect(hostOf(authority), portOf(authority));
 			this.services.set(authority, { service, mutex });
 			return { service, mutex };
 		}
@@ -58,7 +58,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const service = syncService.service;
 		return syncService.mutex.runExclusive(async () => {
 			try {
-				const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
+				const fd = await service.open(uri.path, OpenFlags.O_RDONLY);
 				const stat = await service.stat(fd);
 				await service.close(fd);
 				return {
@@ -82,7 +82,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				const fileNames = await service.list(uri.path);
 				let fileInfo: [string, vscode.FileType][] = [];
 				for (const fileName of fileNames) {
-					const fd = await service.open(uri.path + "/" + fileName, fileservice.OpenFlags.O_RDONLY);
+					const fd = await service.open(uri.path + "/" + fileName, OpenFlags.O_RDONLY);
 					const stat = await service.stat(fd);
 					await service.close(fd);
 					fileInfo.push([fileName, toFileType(stat.mode)]);
@@ -100,7 +100,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const service = syncService.service;
 		return syncService.mutex.runExclusive(async () => {
 			try {
-				const fd = await service.open(uri.path, fileservice.OpenFlags.O_RDONLY);
+				const fd = await service.open(uri.path, OpenFlags.O_RDONLY);
 				try {
 					const data = await service.readAll(fd);
 					return data;
@@ -128,14 +128,14 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const syncService = await this.getService(uri.authority);
 		const service = syncService.service;
 		return syncService.mutex.runExclusive(async () => {
-			const defaultPermissions = fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR;
+			const defaultPermissions = Permissions.S_IRGRP | Permissions.S_IROTH | Permissions.S_IRUSR | Permissions.S_IWUSR;
 			if (await this.fileExists(service, uri.path)) {
 				// File exists
 				if (options.create && !options.overwrite) {
 					throw vscode.FileSystemError.NoPermissions(uri);
 				}
 
-				const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.overwrite ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
+				const fd = await service.open(uri.path, OpenFlags.O_WRONLY | (options.overwrite ? OpenFlags.O_TRUNC : 0), defaultPermissions);
 				try {
 					await service.write(fd, Buffer.from(content));
 				} finally {
@@ -146,7 +146,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				if (!options.create) {
 					throw vscode.FileSystemError.FileExists(uri);
 				}
-				const fd = await service.open(uri.path, fileservice.OpenFlags.O_WRONLY | (options.create ? fileservice.OpenFlags.O_CREAT : 0) | (options.create ? fileservice.OpenFlags.O_TRUNC : 0), defaultPermissions);
+				const fd = await service.open(uri.path, OpenFlags.O_WRONLY | (options.create ? OpenFlags.O_CREAT : 0) | (options.create ? OpenFlags.O_TRUNC : 0), defaultPermissions);
 				try {
 					await service.write(fd, Buffer.from(content));
 				} finally {
@@ -158,9 +158,9 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	}
 
 
-	private async fileExists(service: fileservice.FileService, path: string): Promise<boolean> {
+	private async fileExists(service: FileService, path: string): Promise<boolean> {
 		try {
-			const fd = await service.open(path, fileservice.OpenFlags.O_RDONLY);
+			const fd = await service.open(path, OpenFlags.O_RDONLY);
 			await service.close(fd);
 			return true;
 		} catch (error: unknown) {
@@ -249,7 +249,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 			}
 
 			try {
-				await service.open(uri.path, fileservice.OpenFlags.O_CREAT | fileservice.OpenFlags.O_WRONLY, fileservice.Permissions.S_IFDIR | fileservice.Permissions.S_IRUSR | fileservice.Permissions.S_IWUSR | fileservice.Permissions.S_IRGRP | fileservice.Permissions.S_IWGRP | fileservice.Permissions.S_IROTH | fileservice.Permissions.S_IWOTH);
+				await service.open(uri.path, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IFDIR | Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IWGRP | Permissions.S_IROTH | Permissions.S_IWOTH);
 			} catch (error: unknown) {
 				throw vscode.FileSystemError.FileExists(uri);
 			};
