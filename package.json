@@ -10,15 +10,40 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onFileSystem:qnxfs"
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "QNX QConn",
+      "properties": {
+        "qConn.target.host": {
+          "type": "string",
+          "default": "192.168.203.128",
+          "description": "QNX target host"
+        },
+        "qConn.target.port": {
+          "type": "number",
+          "default": "8000",
+          "description": "QNX target port"
+        }
+      }
+    },
     "commands": [
       {
         "command": "qconn.kill",
         "title": "Kill QNX Process"
+      },
+      {
+        "command": "qconn.connectFs",
+        "title": "Connect to QNX Filesystem"
+      },
+      {
+        "command": "qconn.createQNXTerminal",
+        "title": "Create QNX Terminal"
       }
+
     ],
     "views": {
       "explorer": [
@@ -46,14 +71,17 @@
     "test": "vscode-test"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "18.x",
+    "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
-    "eslint": "^8.56.0",
-    "typescript": "^5.3.3",
     "@vscode/test-cli": "^0.0.4",
-    "@vscode/test-electron": "^2.3.8"
+    "@vscode/test-electron": "^2.3.8",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "async-mutex": "^0.4.0"
   }
 }

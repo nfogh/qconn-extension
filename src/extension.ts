@@ -2,12 +2,13 @@ import * as vscode from 'vscode';
 import * as qconn from 'qconn';
 import * as cntlservice from 'qconn/out/cntlservice';
 import * as processListProvider from './processListProvider';
-import { Serializable } from 'child_process';
+import { QConnFileSystemProvider } from './qconnFileSystemProvider';
+import { createQConnTerminal } from './qconnTerminal';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
-const qnxTargetHost = "192.168.23.128";
-const qnxTargetPort = 8000;
+const qnxTargetHost = vscode.workspace.getConfiguration("Qconn").get<string>("target.host", "192.168.203.128");
+const qnxTargetPort = vscode.workspace.getConfiguration("Qconn").get<number>("target.port", 8000);
 
 let treeView: vscode.TreeView<processListProvider.Process>;
 let treeDataProvider = new processListProvider.ProcessListProvider(qnxTargetHost, qnxTargetPort);
@@ -52,10 +53,21 @@ async function kill(process: processListProvider.Process | undefined) {
 	}
 }
 
+async function connectFs(): Promise<void> {
+	vscode.workspace.updateWorkspaceFolders(0, 0, {
+		uri: vscode.Uri.parse(`qnxfs://${qnxTargetHost}:${qnxTargetPort}`),
+		name: `QNX@${qnxTargetHost}:${qnxTargetPort}`
+	});
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
 
+	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qnxfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
+
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.kill', kill));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.connectFs', connectFs));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQNXTerminal', () => { createQConnTerminal(qnxTargetHost, qnxTargetPort); }));
 
 	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
 
