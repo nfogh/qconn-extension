@@ -28,7 +28,7 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
             try {
                 this.isUpdating = true;
                 if (this.sInfoService === undefined) {
-                    this.processes = [new StatusLabel(`Connecting to ${this.host}...`, -1, vscode.TreeItemCollapsibleState.None)];
+                    this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}...`, -1, vscode.TreeItemCollapsibleState.None)];
                     this._onDidChangeTreeData.fire();
                     this.sInfoService = await SInfoService.connect(this.host, this.port);
                 }
@@ -40,7 +40,7 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
                 this.processes = processes.sort((a, b) => b.pid - a.pid);
                 this._onDidChangeTreeData.fire();
             } catch (error) {
-                this.processes = [new StatusLabel(`Unable to list processes. Is qconn running on ${this.host}`, -1, vscode.TreeItemCollapsibleState.None)];
+                this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}...`, -1, vscode.TreeItemCollapsibleState.None)];
                 await this.sInfoService?.disconnect();
                 this.sInfoService = undefined;
                 this._onDidChangeTreeData.fire();

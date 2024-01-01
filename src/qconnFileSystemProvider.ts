@@ -46,11 +46,27 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const service = this.services.get(authority);
 		if (service === undefined) {
 			const mutex = new Mutex();
-			const service = await FileService.connect(hostOf(authority), portOf(authority));
-			this.services.set(authority, { service, mutex });
-			return { service, mutex };
+			try {
+				const service = await FileService.connect(hostOf(authority), portOf(authority));
+				this.services.set(authority, { service, mutex });
+				return { service, mutex };
+			} catch (error: unknown) {
+				throw vscode.FileSystemError.Unavailable(`Failed to connect to ${authority}: ${error}`);
+			}
 		}
 		return service;
+	}
+
+	MapErrorAndDisconnectIfNecessary(error: unknown, uri: vscode.Uri): Error {
+		if (error instanceof Error) {
+			if (error.message.includes("No such file or directory")) {
+				return vscode.FileSystemError.FileNotFound(uri);
+			}
+		}
+
+		// Some other problem, assume we need to reconnect
+		this.services.delete(uri.authority);
+		return vscode.FileSystemError.Unavailable(`Failed to stat ${uri.path}: ${error}`);
 	}
 
 	async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
@@ -69,7 +85,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				};
 			}
 			catch (error: unknown) {
-				throw vscode.FileSystemError.FileNotFound(uri);
+				throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 			}
 		});
 	}
@@ -90,7 +106,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				return fileInfo;
 			}
 			catch (error: unknown) {
-				throw vscode.FileSystemError.FileNotFound(uri);
+				throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 			}
 		});
 	}
@@ -108,7 +124,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 					await service.close(fd);
 				}
 			} catch (error: unknown) {
-				throw vscode.FileSystemError.FileNotFound(uri);
+				throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 			}
 		});
 	}
@@ -138,6 +154,8 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				const fd = await service.open(uri.path, OpenFlags.O_WRONLY | (options.overwrite ? OpenFlags.O_TRUNC : 0), defaultPermissions);
 				try {
 					await service.write(fd, Buffer.from(content));
+				} catch (error: unknown) {
+					throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 				} finally {
 					await service.close(fd);
 				}
@@ -149,6 +167,8 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				const fd = await service.open(uri.path, OpenFlags.O_WRONLY | (options.create ? OpenFlags.O_CREAT : 0) | (options.create ? OpenFlags.O_TRUNC : 0), defaultPermissions);
 				try {
 					await service.write(fd, Buffer.from(content));
+				} catch (error: unknown) {
+					throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 				} finally {
 					await service.close(fd);
 				}
@@ -187,7 +207,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const syncService = await this.getService(oldUri.authority);
 		const service = syncService.service;
 		syncService.mutex.runExclusive(async () => {
-			if (! await this.fileExists(service, oldUri.path)) {
+			if (!await this.fileExists(service, oldUri.path)) {
 				throw vscode.FileSystemError.FileNotFound(oldUri);
 			}
 			if (await this.fileExists(service, newUri.path)) {
@@ -198,14 +218,14 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 						await service.delete(newUri.path);
 						await service.move(oldUri.path, newUri.path);
 					} catch (error: unknown) {
-						throw vscode.FileSystemError.NoPermissions(newUri);
+						throw this.MapErrorAndDisconnectIfNecessary(error, newUri);
 					}
 				}
 			} else {
 				try {
 					service.move(oldUri.path, newUri.path);
 				} catch (error: unknown) {
-					throw vscode.FileSystemError.NoPermissions(newUri);
+					throw this.MapErrorAndDisconnectIfNecessary(error, newUri);
 				}
 			}
 		});
@@ -227,7 +247,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				await service.delete(uri.path);
 			}
 			catch (error: unknown) {
-				throw vscode.FileSystemError.FileNotFound(uri);
+				throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 			}
 		});
 	}
@@ -244,14 +264,14 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 		const syncService = await this.getService(uri.authority);
 		const service = syncService.service;
 		syncService.mutex.runExclusive(async () => {
-			if (await this.fileExists(service, uri.path)) {
-				throw vscode.FileSystemError.FileExists(uri);
-			}
-
 			try {
+				if (await this.fileExists(service, uri.path)) {
+					throw vscode.FileSystemError.FileExists(uri);
+				}
+
 				await service.open(uri.path, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IFDIR | Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IWGRP | Permissions.S_IROTH | Permissions.S_IWOTH);
 			} catch (error: unknown) {
-				throw vscode.FileSystemError.FileExists(uri);
+				throw this.MapErrorAndDisconnectIfNecessary(error, uri);
 			};
 		});
 	}

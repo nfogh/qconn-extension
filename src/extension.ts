@@ -45,10 +45,14 @@ async function pickTargetPID(host: string, port: number): Promise<number | undef
 async function kill(process: processListProvider.Process | undefined) {
 	const pid = process ? process.pid : await pickTargetPID(qnxTargetHost, qnxTargetPort);
 	if (pid !== undefined) {
-		log(`Sending SIGKILL to pid ${pid}`);
-		const service = await CntlService.connect(qnxTargetHost, qnxTargetPort);
-		await service.signalProcess(pid, SignalType.kill);
-		await service.disconnect();
+		try {
+			log(`Sending SIGKILL to pid ${pid}`);
+			const service = await CntlService.connect(qnxTargetHost, qnxTargetPort);
+			await service.signalProcess(pid, SignalType.kill);
+			await service.disconnect();
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to kill process ${pid}: ${error}`);
+		}
 	}
 }
 
