@@ -32,6 +32,8 @@ This extension contributes the following settings:
 * `qConn.target.host`: The hostname or IP of the target QNX system.
 * `qConn.target.port`: The port of the target QNX system (defaults to 8000).
 
+The current host and port of QNX can also be set by clicking on the statusbar
+![Status bar](resources/images/statusbar.png)
 
 ## Release Notes
 

@@ -6,11 +6,13 @@ import { createQConnTerminal } from './qconnTerminal';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
-const qnxTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "192.168.203.128");
-const qnxTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
+let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
+let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
 
 let treeView: vscode.TreeView<processListProvider.Process>;
-let treeDataProvider = new processListProvider.ProcessListProvider(qnxTargetHost, qnxTargetPort);
+let treeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
+
+let statusBarItem: vscode.StatusBarItem;
 
 // Log function to write messages to the output channel
 function log(message: string) {
@@ -43,11 +45,11 @@ async function pickTargetPID(host: string, port: number): Promise<number | undef
 }
 
 async function kill(process: processListProvider.Process | undefined) {
-	const pid = process ? process.pid : await pickTargetPID(qnxTargetHost, qnxTargetPort);
+	const pid = process ? process.pid : await pickTargetPID(qConnTargetHost, qConnTargetPort);
 	if (pid !== undefined) {
 		try {
 			log(`Sending SIGKILL to pid ${pid}`);
-			const service = await CntlService.connect(qnxTargetHost, qnxTargetPort);
+			const service = await CntlService.connect(qConnTargetHost, qConnTargetPort);
 			await service.signalProcess(pid, SignalType.kill);
 			await service.disconnect();
 		} catch (error) {
@@ -58,21 +60,61 @@ async function kill(process: processListProvider.Process | undefined) {
 
 async function connectFs(): Promise<void> {
 	vscode.workspace.updateWorkspaceFolders(0, 0, {
-		uri: vscode.Uri.parse(`qnxfs://${qnxTargetHost}:${qnxTargetPort}`),
-		name: `QNX@${qnxTargetHost}:${qnxTargetPort}`
+		uri: vscode.Uri.parse(`qconn://${qConnTargetHost}:${qConnTargetPort}`),
+		name: `QNX@${qConnTargetHost}:${qConnTargetPort}`
 	});
+}
+
+async function selectQConnTarget() {
+	try {
+		const input = await vscode.window.showInputBox({ prompt: "Enter QConn target host", value: `${qConnTargetHost}:${qConnTargetPort}`, ignoreFocusOut: true });
+		if (input) {
+			let dirty = false;
+			const config = vscode.workspace.getConfiguration("qConn");
+			const tokens = input.split(":");
+			const newHost = tokens[0];
+			if (tokens.length === 2) {
+				const newPort = parseInt(tokens[1]);
+				if (config.get<number>("target.port", 8000) !== newPort) {
+					await config.update("target.port", newPort, true);
+					qConnTargetPort = newPort;
+					dirty = true;
+				}
+			}
+			if (config.get<string>("target.host", "127.0.0.1") !== newHost) {
+				await config.update("target.host", newHost, true);
+				qConnTargetHost = newHost;
+				dirty = true;
+			}
+
+			if (dirty) {
+				statusBarItem.text = `QConn@${qConnTargetHost}`;
+				treeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
+			}
+		}
+	} catch (error) {
+		vscode.window.showErrorMessage(`Failed to set QConn target: ${error}`);
+	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
 
-	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qnxfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
+	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconn', new QConnFileSystemProvider(), { isCaseSensitive: true }));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.kill', kill));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.connectFs', connectFs));
-	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQNXTerminal', () => { createQConnTerminal(qnxTargetHost, qnxTargetPort); }));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQConnTerminal', () => { createQConnTerminal(qConnTargetHost, qConnTargetPort); }));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
 
 	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
+
+	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
+	statusBarItem.text = `QConn@${qConnTargetHost}`;
+	statusBarItem.tooltip = "Click to select QConn target";
+	statusBarItem.command = "qconn.selectQConnTarget";
+	statusBarItem.show();
+	context.subscriptions.push(statusBarItem);
 
 	treeView.onDidChangeVisibility(event => {
 		if (event.visible) {
@@ -83,7 +125,6 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {
 	outputChannel.dispose();
 }

@@ -3,6 +3,7 @@
   "displayName": "QNX qconn Extension",
   "description": "Improve QNX development experience by leveraging qconn functionality",
   "version": "0.0.1",
+  "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -15,22 +16,22 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onFileSystem:qnxfs"
+    "onFileSystem:qconn"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "configuration": {
-      "title": "QNX QConn",
+      "title": "QConn",
       "properties": {
         "qConn.target.host": {
           "type": "string",
           "default": "192.168.203.128",
-          "description": "QNX target host"
+          "description": "QConn host"
         },
         "qConn.target.port": {
           "type": "number",
           "default": "8000",
-          "description": "QNX target port"
+          "description": "QConn port"
         }
       }
     },
@@ -41,11 +42,15 @@
       },
       {
         "command": "qconn.connectFs",
-        "title": "Connect to QNX Filesystem"
+        "title": "Connect to QConn Filesystem"
       },
       {
-        "command": "qconn.createQNXTerminal",
-        "title": "Create QNX Terminal"
+        "command": "qconn.createQConnTerminal",
+        "title": "Create QConn Terminal"
+      },
+      {
+        "command": "qconn.selectQConnHost",
+        "title": "Select QConn Host"
       }
     ],
     "views": {
