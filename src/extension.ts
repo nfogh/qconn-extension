@@ -119,17 +119,16 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 		previousDestFileDir = destFileDir;
 		const destFilePath = `${destFileDir}/${nodepath.basename(filePath.fsPath)}`;
 		const fileService = await FileService.connect(qConnTargetHost, qConnTargetPort);
-		const fd = await fileService.open(destFilePath, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IROTH)
+		const fd = await fileService.open(destFilePath, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IROTH);
 		try {
-			fileService.write(fd, Buffer.from(data));
+			await fileService.write(fd, Buffer.from(data));
 		} finally {
 			await fileService.close(fd);
-			fileService.disconnect();
 		}
 
 		vscode.window.showInformationMessage(`Copied ${filePath.fsPath} to ${qConnTargetHost}:${qConnTargetPort}${destFilePath}`);
 	} catch (error: unknown) {
-		vscode.window.showInformationMessage(`Unable to copy ${filePath} to ${qConnTargetHost}:${qConnTargetPort}: ${error}`);
+		vscode.window.showErrorMessage(`Unable to copy ${filePath} to ${qConnTargetHost}:${qConnTargetPort}: ${error}`);
 	}
 }
 

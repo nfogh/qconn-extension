@@ -21,10 +21,10 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
         this.update();
     }
 
-    public setHost(host: string, port?: number) {
+    public setHost(host: string, port: number) {
         if (this.host !== host || this.port !== port) {
             this.host = host;
-            this.port = port ?? this.port;
+            this.port = port;
             this.sInfoService?.disconnect();
             this.sInfoService = undefined; // We will automatically reconnect on the next update
             this.update();
