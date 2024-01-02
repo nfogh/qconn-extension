@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "Improve QNX development experience by leveraging qconn functionality",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"
@@ -51,6 +51,10 @@
       {
         "command": "qconn.selectQConnHost",
         "title": "Select QConn Host"
+      },
+      {
+        "command": "qconn.copyFileToTarget",
+        "title": "Copy file to QNX target"
       }
     ],
     "views": {
@@ -66,6 +70,14 @@
         {
           "command": "qconn.kill",
           "when": "view == qConnProcessView && viewItem == ProcessID"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "qconn.copyFileToTarget",
+          "alt": "Copy file to QNX target",
+          "group": "navigation",
+          "when": "isFileSystemResource && !explorerResourceIsFolder"
         }
       ]
     }

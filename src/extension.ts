@@ -3,6 +3,8 @@ import { CntlService, SignalType, getPids } from 'qconn';
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal } from './qconnTerminal';
+import { FileService, OpenFlags, Permissions } from 'qconn';
+import * as nodepath from 'path';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
@@ -97,6 +99,41 @@ async function selectQConnTarget() {
 	}
 }
 
+var previousDestFileDir: string = "/";
+
+async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void> {
+	try {
+		if (!filePath) {
+			const selectedFilePath = await vscode.window.showOpenDialog({canSelectFiles: true, canSelectFolders: false, canSelectMany: false});
+			if (!selectedFilePath) {
+				return;
+			}
+			filePath = selectedFilePath[0];
+		}
+
+		const data = await vscode.workspace.fs.readFile(filePath);
+		const destFileDir = await vscode.window.showInputBox({title: "Type in destination directory", value: previousDestFileDir, ignoreFocusOut: true});
+		if (!destFileDir) {
+			return;
+		}
+		previousDestFileDir = destFileDir;
+		const destFilePath = `${destFileDir}/${nodepath.basename(filePath.fsPath)}`;
+		const fileService = await FileService.connect(qConnTargetHost, qConnTargetPort);
+		const fd = await fileService.open(destFilePath, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IROTH)
+		try {
+			fileService.write(fd, Buffer.from(data));
+		} finally {
+			await fileService.close(fd);
+			fileService.disconnect();
+		}
+
+		vscode.window.showInformationMessage(`Copied ${filePath.fsPath} to ${qConnTargetHost}:${qConnTargetPort}${destFilePath}`);
+	} catch (error: unknown) {
+		vscode.window.showInformationMessage(`Unable to copy ${filePath} to ${qConnTargetHost}:${qConnTargetPort}: ${error}`);
+	}
+}
+
+
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
 
@@ -106,6 +143,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.connectFs', connectFs));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQConnTerminal', () => { createQConnTerminal(qConnTargetHost, qConnTargetPort); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
 
 	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
 
