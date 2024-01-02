@@ -116,6 +116,7 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 		if (!destFileDir) {
 			return;
 		}
+		
 		previousDestFileDir = destFileDir;
 		const destFilePath = `${destFileDir}/${nodepath.basename(filePath.fsPath)}`;
 		const fileService = await FileService.connect(qConnTargetHost, qConnTargetPort);

@@ -75,7 +75,6 @@
       "explorer/context": [
         {
           "command": "qconn.copyFileToTarget",
-          "alt": "Copy file to QNX target",
           "group": "navigation",
           "when": "isFileSystemResource && !explorerResourceIsFolder"
         }

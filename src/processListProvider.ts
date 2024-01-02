@@ -77,6 +77,7 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
     }
 
     startUpdating(intervalMS: number = 2000) {
+        this.update();
         this.timer = this.startUpdateTimer(intervalMS);
     }
 
