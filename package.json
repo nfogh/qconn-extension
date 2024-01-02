@@ -4,6 +4,7 @@
   "description": "Improve QNX development experience by leveraging qconn functionality",
   "version": "1.0.0",
   "icon": "resources/icon.png",
+  "publisher": "NikolajFogh",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -66,14 +67,14 @@
       ]
     },
     "terminal": {
-			"profiles": [
-				{
-					"id": "qconnTerminal.terminal-profile",
-					"icon": "terminal",
-					"title": "QConn Terminal"
-				}
-			]
-		},
+      "profiles": [
+        {
+          "id": "qconnTerminal.terminal-profile",
+          "icon": "terminal",
+          "title": "QConn Terminal"
+        }
+      ]
+    },
     "menus": {
       "view/item/context": [
         {
