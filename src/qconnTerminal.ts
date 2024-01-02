@@ -71,6 +71,10 @@ class PacketizedSocket {
         this.socket.write(buffer);
     }
 
+    public remaining(): Buffer {
+        return this.receiveBuffer;
+    }
+
     async read(endOfPacket: string | Buffer | number, timeout: number = 50000): Promise<Buffer> {
         if (typeof endOfPacket === "string") {
             this.endOfPacket = Buffer.from(endOfPacket);
@@ -99,39 +103,74 @@ class PacketizedSocket {
     }
 }
 
-export async function createQConnTerminal(host: string, port: number) {
+async function createConnection(host: string, port: number) : Promise<net.Socket>
+{
+    return new Promise<net.Socket>((resolve, reject) => {
+        const socket = net.createConnection({ host: host, port: port });
+        socket.on("connect", () => {
+            resolve(socket);
+        });
+        socket.on("error", (err) => {
+            reject(err);
+        });
+        socket.on("timeout", () => {
+            reject(new Error("Timeout"));
+        });
+    });
+}
+
+async function createPty(host: string, port: number) : Promise<vscode.Pseudoterminal>
+{
     const writeEmitter = new vscode.EventEmitter<string>();
     const onDidClose = new vscode.EventEmitter<number>();
-    const socket = net.createConnection({ host: host, port: port }, () => {
-        const pty = {
-            onDidWrite: writeEmitter.event,
-            onDidClose: onDidClose.event,
-            open: async () => {
-                writeEmitter.fire(`Connecting to ${host}...\r\n`);
-                var client = new PacketizedSocket(socket);
-                await client.read("QCONN\r\n");
-                await client.read(Buffer.from([0xff, 0xfd, 0x22]));
-                client.write("service launcher\r\n");
-                await client.read("OK\r\n");
-                client.write("start/flags run /bin/sh /bin/sh -i\r\n");
-                await client.read("have full job control\n");
-                writeEmitter.fire(`Connected to ${host}\r\n`);
-                socket.on("data", (data) => {
-                    writeEmitter.fire(data.toString("utf8").replace(/\r\n|\n/g, '\r\n'));
-                });
-                socket.on("close", () => {
-                    writeEmitter.fire("Remote side closed the connection\r\n");
-                    onDidClose.fire(0);
-                });
-            },
-            close: () => {
-                socket.write("exit\r\n", () => { socket.end(); });
-            },
-            handleInput: (data: string) => {
-                socket.write(data.replace("\r", "\r\n"));
-            }
-        };
-        const terminal = vscode.window.createTerminal({ name: `QNX@${host}`, pty });
-        terminal.show();
+    const socket = await createConnection(host, port);
+    return {
+        onDidWrite: writeEmitter.event,
+        onDidClose: onDidClose.event,
+        open: async () => {
+            writeEmitter.fire(`Connecting to ${host}...\r\n`);
+            var client = new PacketizedSocket(socket);
+            await client.read("QCONN\r\n");
+            await client.read(Buffer.from([0xff, 0xfd, 0x22]));
+            client.write("service launcher\r\n");
+            await client.read("OK\r\n");
+            client.write("start/flags run /bin/sh /bin/sh -i\r\n");
+            await client.read("have full job control\n");
+            writeEmitter.fire(`Connected to ${host}\r\n`);
+            writeEmitter.fire(client.remaining().toString("utf8"));
+            socket.on("data", (data) => {
+                writeEmitter.fire(data.toString("utf8").replace(/\r\n|\n/g, '\r\n'));
+            });
+            socket.on("close", () => {
+                writeEmitter.fire("Remote side closed the connection\r\n");
+                onDidClose.fire(0);
+            });
+        },
+        close: () => {
+            socket.write("exit\r\n", () => { socket.end(); });
+        },
+        handleInput: (data: string) => {
+            socket.write(data.replace("\r", "\r\n"));
+        }
+    };
+}
+
+export async function createQConnTerminal(host: string, port: number) {
+    const terminal = vscode.window.createTerminal({ name: `QNX@${host}`, pty: (await createPty(host, port)) });
+    terminal.show();
+}
+
+export function createTerminalProfile() {
+    return vscode.window.registerTerminalProfileProvider("qconnTerminal.terminal-profile", {
+        async provideTerminalProfile(token: vscode.CancellationToken) : Promise<vscode.TerminalProfile> {
+            return {
+                options: {
+                    name: 'QConn terminal',
+                    pty: (await createPty(
+                        vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1"),
+                        vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000)))
+                }
+            };
+        }
     });
 }

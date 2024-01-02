@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { CntlService, SignalType, getPids } from 'qconn';
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
-import { createQConnTerminal } from './qconnTerminal';
+import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
 import { FileService, OpenFlags, Permissions } from 'qconn';
 import * as nodepath from 'path';
 
@@ -144,7 +144,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQConnTerminal', () => { createQConnTerminal(qConnTargetHost, qConnTargetPort); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
-
+	context.subscriptions.push(createTerminalProfile());
 	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
 
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);

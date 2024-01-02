@@ -65,6 +65,15 @@
         }
       ]
     },
+    "terminal": {
+			"profiles": [
+				{
+					"id": "qconnTerminal.terminal-profile",
+					"icon": "terminal",
+					"title": "QConn Terminal"
+				}
+			]
+		},
     "menus": {
       "view/item/context": [
         {
