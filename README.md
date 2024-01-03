@@ -1,20 +1,30 @@
 # QNX QConn Extension README
 
-The QNX QConn extension connects to the qconn broker on a QNX system to provide various features in vs CODE
+Although QNX has released an official extension for vs code, that extension only
+supports QNX SDK 8.0. This leaves the ones unwilling or unable to upgrade with
+poor tools for interacting with a QNX target.
+
+This open-source extension gives you the bare minimum, such as a QNX shell, a
+QNX filesystem explorer and a QNX process list.
+
+For simplicity, this extension assumes you have just a single QNX target you
+work with.
 
 ## Features
 
 ### QNX process explorer
 ![Process explorer](resources/images/processexplorer.png)
 
-The process explorer lets you see the running processes on the target, and kill them if needed.
+The process explorer lets you see the running processes on the target, and kill 
+them if needed.
 
 The process explorer is available in the explorer view once the extension is loaded.
 
 ### QNX filesystem provider
 ![Filesystem provider](resources/images/filesystemprovider.png)
 
-You can connect to the QNX target file system by running the command "Connect to QNX filesystem".
+You can connect to the QNX target file system by running the command "Connect to
+QNX filesystem".
 
 ### QNX terminal
 ![Process explorer](resources/images/terminal.png)
@@ -34,6 +44,33 @@ This extension contributes the following settings:
 
 The current host and port of QNX can also be set by clicking on the statusbar
 ![Status bar](resources/images/statusbar.png)
+
+## Contributing
+Contributions to this extension are much welcome.
+
+To develop and test the extension, the VMWare image downloadable from the QNX
+website is used. It contains a QNX image v 6.3 running qconn. Thus, the 
+extension is tested with that version.
+
+For performance reasons, the extension tries as much as possible to use the
+native qconn protocol.
+
+However, given the fact that we can basically spawn a root shell on the target
+and remote control that, the options are practically limitless as to what can
+be done :)
+
+The QNX documentation has helped quite a bit with deciphering the output coming
+from qconn. However, there has also been a lot of guesswork involved with 
+reverse engineering the protocol :)
+
+## qConn package
+Connection to qconn is done using the qConn npm package
+(https://www.npmjs.com/package/qconn). The development of that library goes
+hand-in-hand with the development of this extension.
+
+## Thanks
+Thanks goes out to https://github.com/zayfod/qcl for initial hints on how to
+interface with qconn.
 
 ## Release Notes
 
