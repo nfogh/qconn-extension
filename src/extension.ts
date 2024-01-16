@@ -67,32 +67,31 @@ async function connectFs(): Promise<void> {
 	});
 }
 
+function configurationUpdated()
+{
+	let dirty = false;
+	const configPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
+	const configHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
+
+	if ((configPort !== qConnTargetPort) || (configHost !== qConnTargetHost)) {
+		qConnTargetPort = configPort;
+		qConnTargetHost = configHost;
+		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
+		treeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
+	}
+}
+
 async function selectQConnTarget() {
 	try {
 		const input = await vscode.window.showInputBox({ prompt: "Enter QConn target host", value: `${qConnTargetHost}:${qConnTargetPort}`, ignoreFocusOut: true });
 		if (input) {
-			let dirty = false;
-			const config = vscode.workspace.getConfiguration("qConn");
 			const tokens = input.split(":");
 			const newHost = tokens[0];
 			if (tokens.length === 2) {
 				const newPort = parseInt(tokens[1]);
-				if (config.get<number>("target.port", 8000) !== newPort) {
-					await config.update("target.port", newPort, true);
-					qConnTargetPort = newPort;
-					dirty = true;
-				}
+				await vscode.workspace.getConfiguration("qConn").update("target.port", newPort, true);
 			}
-			if (config.get<string>("target.host", "127.0.0.1") !== newHost) {
-				await config.update("target.host", newHost, true);
-				qConnTargetHost = newHost;
-				dirty = true;
-			}
-
-			if (dirty) {
-				statusBarItem.text = `QConn@${qConnTargetHost}`;
-				treeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
-			}
+			await vscode.workspace.getConfiguration("qConn").update("target.host", newHost, true);
 		}
 	} catch (error) {
 		vscode.window.showErrorMessage(`Failed to set QConn target: ${error}`);
@@ -148,7 +147,7 @@ export function activate(context: vscode.ExtensionContext) {
 	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
 
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-	statusBarItem.text = `QConn@${qConnTargetHost}`;
+	statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
 	statusBarItem.tooltip = "Click to select QConn target";
 	statusBarItem.command = "qconn.selectQConnTarget";
 	statusBarItem.show();
@@ -161,6 +160,8 @@ export function activate(context: vscode.ExtensionContext) {
 			treeDataProvider.stopUpdating();
 		}
 	});
+
+	vscode.workspace.onDidChangeConfiguration(() => { configurationUpdated(); });
 }
 
 export function deactivate() {
