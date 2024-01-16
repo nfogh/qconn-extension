@@ -1,9 +1,7 @@
 # Change Log
 
-All notable changes to the "qconn-extension" extension will be documented in this file.
+## [1.1.2]
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [Unreleased]
-
-- Initial release
+- Use QNX instead of Qconn in labels
+- Display the port if it is non-default (8000)
+- Automatically reload config on change
