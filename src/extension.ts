@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { CntlService, SignalType, getPids } from 'qconn';
+import { CntlService, SignalType, getPids, FileService, OpenFlags, Permissions } from 'qconn';
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
-import { FileService, OpenFlags, Permissions } from 'qconn';
+import { SysInfoUpdater} from './sysInfoUpdater';
 import * as nodepath from 'path';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
@@ -15,6 +15,8 @@ let treeView: vscode.TreeView<processListProvider.Process>;
 let treeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
 
 let statusBarItem: vscode.StatusBarItem;
+
+let sysInfoUpdater: SysInfoUpdater;
 
 // Log function to write messages to the output channel
 function log(message: string) {
@@ -162,9 +164,20 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	vscode.workspace.onDidChangeConfiguration(() => { configurationUpdated(); });
+
+	sysInfoUpdater = new SysInfoUpdater(qConnTargetHost, qConnTargetPort, (hostname, memTotal, memFree) => {
+		statusBarItem.text = `QConn@${qConnTargetHost}`;
+		if (qConnTargetPort !== 8000) {
+			statusBarItem.text += qConnTargetPort;
+		}
+		const MB = BigInt(1024*1024);
+		statusBarItem.text += `  ${Number(memFree/MB)} MB / ${Number(memTotal/MB)}MB`;
+	});
+	sysInfoUpdater.startUpdating();
 }
 
 export function deactivate() {
+	sysInfoUpdater.stopUpdating();
 	outputChannel.dispose();
 }
 
