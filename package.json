@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "QNX target file system browser, process explorer and terminal in vs code",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "icon": "resources/icon.png",
   "publisher": "NikolajFogh",
   "engines": {
@@ -17,7 +17,7 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onFileSystem:qconn"
+    "onFileSystem:qconnfs"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -33,6 +33,11 @@
           "type": "number",
           "default": "8000",
           "description": "The port that qconn is running on"
+        },
+        "qConn.showMemoryUsage": {
+          "type": "boolean",
+          "default": "true",
+          "description": "Show QNX system memory usage in the status bar"
         }
       }
     },

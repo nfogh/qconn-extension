@@ -64,7 +64,7 @@ async function kill(process: processListProvider.Process | undefined) {
 
 async function connectFs(): Promise<void> {
 	vscode.workspace.updateWorkspaceFolders(0, 0, {
-		uri: vscode.Uri.parse(`qconn://${qConnTargetHost}:${qConnTargetPort}`),
+		uri: vscode.Uri.parse(`qconnfs://${qConnTargetHost}:${qConnTargetPort}`),
 		name: `QNX@${qConnTargetHost}:${qConnTargetPort}`
 	});
 }
@@ -138,7 +138,7 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
 
-	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconn', new QConnFileSystemProvider(), { isCaseSensitive: true }));
+	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconnfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.kill', kill));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.connectFs', connectFs));
@@ -170,8 +170,10 @@ export function activate(context: vscode.ExtensionContext) {
 		if (qConnTargetPort !== 8000) {
 			statusBarItem.text += qConnTargetPort;
 		}
-		const MB = BigInt(1024*1024);
-		statusBarItem.text += `  ${Number(memFree/MB)} MB / ${Number(memTotal/MB)}MB`;
+		if (vscode.workspace.getConfiguration("qConn").get<boolean>("showMemoryUsage", true)) {
+			const MB = BigInt(1024*1024);
+			statusBarItem.text += `  ${Number(memFree/MB)} MB / ${Number(memTotal/MB)}MB`;
+		}
 	});
 	sysInfoUpdater.startUpdating();
 }
