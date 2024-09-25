@@ -1,6 +1,6 @@
 import { SInfoService } from 'qconn';
 
-export interface CallbackType {(hostname: string, memTotal: bigint, memFree: bigint): void};
+export type CallbackType = (hostname: string, memTotal: bigint, memFree: bigint) => void;
 
 export class SysInfoUpdater
 {
@@ -40,6 +40,7 @@ export class SysInfoUpdater
                 const sysInfo = await this.sInfoService.getSysInfo();
                 this.callback(sysInfo.hostname, sysInfo.memTotal, sysInfo.memFree);
             } catch (error) {
+                this.sInfoService = undefined;
             }
             await new Promise(r => setTimeout(r, this.updateIntervalMS));
         }

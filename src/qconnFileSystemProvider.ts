@@ -223,7 +223,7 @@ export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 				}
 			} else {
 				try {
-					service.move(oldUri.path, newUri.path);
+					await service.move(oldUri.path, newUri.path);
 				} catch (error: unknown) {
 					throw this.MapErrorAndDisconnectIfNecessary(error, newUri);
 				}

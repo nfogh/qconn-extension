@@ -18,6 +18,9 @@ let statusBarItem: vscode.StatusBarItem;
 
 let sysInfoUpdater: SysInfoUpdater;
 
+let prevPing: number = Date.now();
+let pingUpdater: NodeJS.Timeout;
+
 // Log function to write messages to the output channel
 function log(message: string) {
 	outputChannel.appendLine(message);
@@ -26,7 +29,7 @@ function log(message: string) {
 async function pickTargetPID(host: string, port: number): Promise<number | undefined> {
 	try {
 		const processes = await getPids(host, port);
-		var pids: vscode.QuickPickItem[] = [];
+		let pids: vscode.QuickPickItem[] = [];
 		for (const [pid, info] of processes) {
 			pids.push({ label: pid.toString(), description: info.path });
 		}
@@ -100,7 +103,54 @@ async function selectQConnTarget() {
 	}
 }
 
-var previousDestFileDir: string = "/";
+function transferFile(localFilePath: vscode.Uri, remoteFilePath: string): Thenable<void> {
+	return vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: "Transferring",
+		cancellable: true
+	}, async (progress, token) => {
+		if (token.isCancellationRequested) {
+			return;
+		}
+		progress.report({ increment: 0, message: `Reading ${localFilePath.fsPath}...` });
+		const data = Buffer.from(await vscode.workspace.fs.readFile(localFilePath));
+		
+		if (token.isCancellationRequested) {
+			return;
+		}
+		progress.report({ increment: 0, message: `Connecting to ${qConnTargetHost}:${qConnTargetPort}...` });
+
+		const fileService = await FileService.connect(qConnTargetHost, qConnTargetPort);
+
+		const destFileString = `${qConnTargetHost}${qConnTargetPort === 8000 ? '' : ':' + qConnTargetPort.toString()}/${remoteFilePath}`;
+
+		if (token.isCancellationRequested) {
+			return;
+		}
+		progress.report({ increment: 0, message: `Opening  ${destFileString}...` });
+		const fd = await fileService.open(remoteFilePath, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IROTH);
+		try {
+			let numTransferred = 0;
+			while (numTransferred !== data.length) {
+				const toTransfer = Math.min(1024*1024, data.length - numTransferred);
+				const subBuffer = data.subarray(numTransferred, numTransferred + toTransfer);
+				await fileService.write(fd, subBuffer, numTransferred);
+				numTransferred = numTransferred + toTransfer;
+
+				if (token.isCancellationRequested) {
+					return;
+				}
+				progress.report({ increment: toTransfer/data.length*100, message: `${localFilePath.fsPath} to ${destFileString} (${(numTransferred/1024/1024).toFixed(1)} of ${(data.length/1024/1024).toFixed(1)} MB)...` });
+			}
+		} finally {
+			progress.report({ increment: 0, message: `Closing ${destFileString}...`});
+			await fileService.close(fd);
+		}
+		progress.report({ increment: 0, message: `Copied ${localFilePath.fsPath} to ${destFileString}` });
+	});
+}
+
+let previousDestFileDir: string = "/";
 
 async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void> {
 	try {
@@ -112,23 +162,16 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 			filePath = selectedFilePath[0];
 		}
 
-		const data = await vscode.workspace.fs.readFile(filePath);
 		const destFileDir = await vscode.window.showInputBox({title: "Type in destination directory", value: previousDestFileDir, ignoreFocusOut: true});
+
 		if (!destFileDir) {
 			return;
 		}
-		
-		previousDestFileDir = destFileDir;
-		const destFilePath = `${destFileDir}/${nodepath.basename(filePath.fsPath)}`;
-		const fileService = await FileService.connect(qConnTargetHost, qConnTargetPort);
-		const fd = await fileService.open(destFilePath, OpenFlags.O_CREAT | OpenFlags.O_WRONLY, Permissions.S_IRUSR | Permissions.S_IWUSR | Permissions.S_IRGRP | Permissions.S_IROTH);
-		try {
-			await fileService.write(fd, Buffer.from(data));
-		} finally {
-			await fileService.close(fd);
-		}
 
-		vscode.window.showInformationMessage(`Copied ${filePath.fsPath} to ${qConnTargetHost}:${qConnTargetPort}${destFilePath}`);
+		previousDestFileDir = destFileDir;
+		const destFilePath = `${destFileDir === '/' ? '' : destFileDir}/${nodepath.basename(filePath.fsPath)}`;
+
+		await transferFile(filePath, destFilePath);
 	} catch (error: unknown) {
 		vscode.window.showErrorMessage(`Unable to copy ${filePath} to ${qConnTargetHost}:${qConnTargetPort}: ${error}`);
 	}
@@ -166,20 +209,34 @@ export function activate(context: vscode.ExtensionContext) {
 	vscode.workspace.onDidChangeConfiguration(() => { configurationUpdated(); });
 
 	sysInfoUpdater = new SysInfoUpdater(qConnTargetHost, qConnTargetPort, (hostname, memTotal, memFree) => {
-		statusBarItem.text = `QConn@${qConnTargetHost}`;
-		if (qConnTargetPort !== 8000) {
-			statusBarItem.text += qConnTargetPort;
-		}
-		if (vscode.workspace.getConfiguration("qConn").get<boolean>("showMemoryUsage", true)) {
-			const MB = BigInt(1024*1024);
-			statusBarItem.text += `  ${Number(memFree/MB)} MB / ${Number(memTotal/MB)}MB`;
-		}
+		prevPing = Date.now();
+		const MB = BigInt(1024*1024);
+
+		statusBarItem.tooltip = "Click to select QConn target\n" +
+		`Hostname: ${hostname}\n` +
+		`Memory Free ${Number(memFree/MB)}MB / Available ${Number(memTotal/MB)}MB`;
 	});
-	sysInfoUpdater.startUpdating();
+	sysInfoUpdater.startUpdating(5000);
+
+	pingUpdater = setInterval(() => {
+		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
+
+		if (Date.now() - prevPing > 5000) {
+			statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+			statusBarItem.tooltip =
+				"No response from host for 10s.\n" +
+				"Is qconn running?\n" +
+				"Click to select QConn target";
+		} else {
+			statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.background');
+			// tooltip will be updated by SysInfoUpdater
+		}
+	}, 10000);
 }
 
 export function deactivate() {
 	sysInfoUpdater.stopUpdating();
 	outputChannel.dispose();
+	clearInterval(pingUpdater);
 }
 

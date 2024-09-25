@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "QNX target file system browser, process explorer and terminal in vs code",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "icon": "resources/icon.png",
   "publisher": "NikolajFogh",
   "engines": {
