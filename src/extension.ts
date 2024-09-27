@@ -5,14 +5,18 @@ import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
 import { SysInfoUpdater} from './sysInfoUpdater';
 import * as nodepath from 'path';
+import { QConnFileExplorerTreeDataProvider } from './qconnFileExplorerTreeDataProvider';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
 let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
 let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
 
-let treeView: vscode.TreeView<processListProvider.Process>;
-let treeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
+let processExplorerTreeView: vscode.TreeView<processListProvider.Process>;
+let processExplorerTreeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
+
+let fileExplorerTreeView;
+let fileExplorerTreeDataProvider = new QConnFileExplorerTreeDataProvider();
 
 let statusBarItem: vscode.StatusBarItem;
 
@@ -82,7 +86,7 @@ function configurationUpdated()
 		qConnTargetPort = configPort;
 		qConnTargetHost = configHost;
 		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
-		treeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
+		processExplorerTreeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
 	}
 }
 
@@ -172,6 +176,7 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 		const destFilePath = `${destFileDir === '/' ? '' : destFileDir}/${nodepath.basename(filePath.fsPath)}`;
 
 		await transferFile(filePath, destFilePath);
+		fileExplorerTreeDataProvider.refresh();
 	} catch (error: unknown) {
 		vscode.window.showErrorMessage(`Unable to copy ${filePath} to ${qConnTargetHost}:${qConnTargetPort}: ${error}`);
 	}
@@ -189,8 +194,14 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
 	context.subscriptions.push(createTerminalProfile());
-	treeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: treeDataProvider });
+	processExplorerTreeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: processExplorerTreeDataProvider });
 
+	fileExplorerTreeView = vscode.window.createTreeView('qConnFileExplorer', { treeDataProvider: fileExplorerTreeDataProvider });
+	vscode.commands.registerCommand('qconnFileExplorer.refreshEntry', () => fileExplorerTreeDataProvider.refresh() );
+	vscode.commands.registerCommand('qconnProcessView.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry) );
+	vscode.commands.registerCommand('qconnProcessView.createFile', (directory) => { fileExplorerTreeDataProvider.createFileIn(directory); });
+	vscode.commands.registerCommand('qconnProcessView.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); });
+	
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
 	statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
 	statusBarItem.tooltip = "Click to select QConn target";
@@ -198,11 +209,11 @@ export function activate(context: vscode.ExtensionContext) {
 	statusBarItem.show();
 	context.subscriptions.push(statusBarItem);
 
-	treeView.onDidChangeVisibility(event => {
+	processExplorerTreeView.onDidChangeVisibility(event => {
 		if (event.visible) {
-			treeDataProvider.startUpdating();
+			processExplorerTreeDataProvider.startUpdating();
 		} else {
-			treeDataProvider.stopUpdating();
+			processExplorerTreeDataProvider.stopUpdating();
 		}
 	});
 
