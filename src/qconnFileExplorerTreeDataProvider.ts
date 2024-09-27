@@ -2,50 +2,64 @@ import * as vscode from 'vscode';
 import * as fileSystemProvider from './qconnFileSystemProvider';
 import path from 'path';
 
-interface Entry {
+export interface QConnFileExplorerTreeDataEntry {
 	uri: vscode.Uri;
 	type: vscode.FileType;
 }
 
-export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvider<Entry> {
-    private fileSystemProvider: fileSystemProvider.QConnFileSystemProvider;
+type EventType = QConnFileExplorerTreeDataEntry | undefined | null | void;
+
+export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvider<QConnFileExplorerTreeDataEntry> {
+	private fileSystemProvider: fileSystemProvider.QConnFileSystemProvider;
 	private prevDestDir: vscode.Uri | undefined = undefined;
 
 	constructor() {
-        this.fileSystemProvider = new fileSystemProvider.QConnFileSystemProvider();
+		this.fileSystemProvider = new fileSystemProvider.QConnFileSystemProvider();
 	}
 
-	private _onDidChangeTreeData: vscode.EventEmitter<Entry | undefined | null | void> = new vscode.EventEmitter<Entry | undefined | null | void>();
-	readonly onDidChangeTreeData: vscode.Event<Entry | undefined | null | void> = this._onDidChangeTreeData.event;
-  
+	private _onDidChangeTreeData: vscode.EventEmitter<EventType> = new vscode.EventEmitter<EventType>();
+	readonly onDidChangeTreeData: vscode.Event<EventType> = this._onDidChangeTreeData.event;
+
 	refresh(): void {
-	  this._onDidChangeTreeData.fire();
+		this._onDidChangeTreeData.fire();
 	}
 
-	async delete(entry: Entry) : Promise<void> {
+	async delete(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
 		if (entry.type === vscode.FileType.File) {
 			await this.fileSystemProvider.delete(entry.uri);
 			this.refresh();
 		}
 	}
 
-	async createFileIn(entry: Entry) : Promise<void> {
-		if (entry.type === vscode.FileType.Directory) {
-			const fileName = await vscode.window.showInputBox({ prompt: "Type name of file", ignoreFocusOut: true, placeHolder: "file.txt", title: "Type name of file" });
+	async rename(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
+		if (entry.type === vscode.FileType.File) {
+			const fileName = await vscode.window.showInputBox({ prompt: "Type name of file", ignoreFocusOut: false, placeHolder: path.basename(entry.uri.path), title: "Type name of file" });
 			if (fileName) {
-				this.fileSystemProvider.writeFile(vscode.Uri.joinPath(entry.uri, fileName), new Uint8Array(), { create: true, overwrite: true } );
+				const newPath = path.join(path.dirname(entry.uri.path), fileName);
+				const newUri = entry.uri.with({ path: newPath });
+				this.fileSystemProvider.rename(entry.uri, newUri, { overwrite: false });
 				this.refresh();
 			}
 		}
 	}
 
-	async copyFileToHost(entry: Entry) : Promise<void> {
+	async createFile(path: vscode.Uri): Promise<void> {
+		this.fileSystemProvider.writeFile(path, new Uint8Array(), { create: true, overwrite: true });
+		this.refresh();
+	}
+
+	async createDirectory(path: vscode.Uri): Promise<void> {
+		this.fileSystemProvider.createDirectory(path);
+		this.refresh();
+	}
+
+	async copyFileToHost(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
 		if (entry.type === vscode.FileType.File) {
 			if (!this.prevDestDir && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
 				this.prevDestDir = vscode.workspace.workspaceFolders[0].uri;
 			}
 
-			const destDir = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: this.prevDestDir, title: "Select directory to transfer to"});
+			const destDir = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: this.prevDestDir, title: "Select directory to transfer to" });
 			if (destDir) {
 				const data = await this.fileSystemProvider.readFile(entry.uri);
 				await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(destDir[0], path.basename(entry.uri.path)), data);
@@ -54,7 +68,7 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		}
 	}
 
-	async getChildren(element?: Entry): Promise<Entry[]> {
+	async getChildren(element?: QConnFileExplorerTreeDataEntry): Promise<QConnFileExplorerTreeDataEntry[]> {
 		if (element) {
 			const children = await this.fileSystemProvider.readDirectory(element.uri);
 			return children.map(([name, type]) => ({ uri: vscode.Uri.joinPath(element.uri, name), type }));
@@ -74,7 +88,7 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		return children.map(([name, type]) => ({ uri: vscode.Uri.joinPath(uri, name), type }));
 	}
 
-	getTreeItem(element: Entry): vscode.TreeItem {
+	getTreeItem(element: QConnFileExplorerTreeDataEntry): vscode.TreeItem {
 		const treeItem = new vscode.TreeItem(element.uri, element.type === vscode.FileType.Directory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
 		if (element.type === vscode.FileType.File) {
 			treeItem.command = { command: 'vscode.open', title: "Open File", arguments: [element.uri], };

@@ -13,6 +13,7 @@ work with.
 ## Features
 
 ### QNX process explorer
+
 ![Process explorer](resources/images/processexplorer.png)
 
 The process explorer lets you see the running processes on the target, and kill 
@@ -21,12 +22,27 @@ them if needed.
 The process explorer is available in the explorer view once the extension is loaded.
 
 ### QNX filesystem provider
+
 ![Filesystem provider](resources/images/filesystemprovider.png)
 
 You can connect to the QNX target file system by running the command "Connect to
 QNX filesystem".
 
+### QNX filesystem explorer
+
+For the ones that don't want to add the QNX filesystem to their workspace, one
+can do most file operations using the QNX file explorer located beneath the
+regular vscode file explorer. The QNX file explorer tries to mimic the regular
+VSCode filesystem explorer, but because of limitations in the VSCode API, some
+features are not available, especially drag-and-drop is not supported.
+
+### Context menu additions
+
+The VSCode filesystem explorer context menu is extended with a "Copy file to QNX
+target", which will copy the selected file to some directory on the QNX target.
+
 ### QNX terminal
+
 ![Process explorer](resources/images/terminal.png)
 
 You can spawn a QNX root prompt by running the command "Create QNX terminal"

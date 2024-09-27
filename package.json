@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "QNX target file system browser, process explorer and terminal in vs code",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "icon": "resources/icon.png",
   "publisher": "NikolajFogh",
   "engines": {
@@ -65,22 +65,29 @@
       {
         "command": "qconnFileExplorer.refreshEntry",
         "title": "Refresh the qconn file explorer",
-        "icon": {
-          "light": "resources/images/light/refresh.svg",
-          "dark": "resources/images/dark/refresh.svg"
-        }
+        "icon": "$(refresh)"
       },
       {
-        "command": "qconnProcessView.deleteFile",
-        "title": "Delete file"
+        "command": "qconnFileExplorer.deleteFile",
+        "title": "Delete"
       },
       {
-        "command": "qconnProcessView.copyFile",
+        "command": "qconnFileExplorer.copyFile",
         "title": "Copy file to host"
       },
       {
-        "command": "qconnProcessView.createFile",
-        "title": "Create file in directory"
+        "command": "qconnFileExplorer.renameFile",
+        "title": "Rename..."
+      },
+      {
+        "command": "qconnFileExplorer.createFile",
+        "title": "New file...",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "qconnFileExplorer.createDirectory",
+        "title": "New folder...",
+        "icon": "$(file-directory-create)"
       }
     ],
     "views": {
@@ -111,16 +118,24 @@
           "when": "view == qConnProcessView && viewItem == ProcessID"
         },
         {
-          "command": "qconnProcessView.deleteFile",
+          "command": "qconnFileExplorer.deleteFile",
           "when": "view == qConnFileExplorer && viewItem == file"
         },
         {
-          "command": "qconnProcessView.copyFile",
+          "command": "qconnFileExplorer.copyFile",
           "when": "view == qConnFileExplorer && viewItem == file"
         },
         {
-          "command": "qconnProcessView.createFile",
-          "when": "view == qConnFileExplorer && viewItem == directory"
+          "command": "qconnFileExplorer.renameFile",
+          "when": "view == qConnFileExplorer && viewItem == file"
+        },
+        {
+          "command": "qconnFileExplorer.createFile",
+          "when": "view == qConnFileExplorer"
+        },
+        {
+          "command": "qconnFileExplorer.createDirectory",
+          "when": "view == qConnFileExplorer"
         }
       ],
       "explorer/context": [
@@ -132,9 +147,19 @@
       ],
       "view/title": [
         {
-            "command": "qconnFileExplorer.refreshEntry",
-            "when": "view == qConnFileExplorer",
-            "group": "navigation"
+          "command": "qconnFileExplorer.refreshEntry",
+          "when": "view == qConnFileExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "qconnFileExplorer.createDirectory",
+          "when": "view == qConnFileExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "qconnFileExplorer.createFile",
+          "when": "view == qConnFileExplorer",
+          "group": "navigation"
         }
       ]
     }

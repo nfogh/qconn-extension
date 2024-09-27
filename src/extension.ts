@@ -3,9 +3,10 @@ import { CntlService, SignalType, getPids, FileService, OpenFlags, Permissions }
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
-import { SysInfoUpdater} from './sysInfoUpdater';
+import { SysInfoUpdater } from './sysInfoUpdater';
 import * as nodepath from 'path';
-import { QConnFileExplorerTreeDataProvider } from './qconnFileExplorerTreeDataProvider';
+import { QConnFileExplorerTreeDataProvider, QConnFileExplorerTreeDataEntry } from './qconnFileExplorerTreeDataProvider';
+import { create } from 'domain';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
@@ -15,7 +16,7 @@ let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("ta
 let processExplorerTreeView: vscode.TreeView<processListProvider.Process>;
 let processExplorerTreeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
 
-let fileExplorerTreeView;
+let fileExplorerTreeView: vscode.TreeView<QConnFileExplorerTreeDataEntry>;
 let fileExplorerTreeDataProvider = new QConnFileExplorerTreeDataProvider();
 
 let statusBarItem: vscode.StatusBarItem;
@@ -76,8 +77,7 @@ async function connectFs(): Promise<void> {
 	});
 }
 
-function configurationUpdated()
-{
+function configurationUpdated() {
 	let dirty = false;
 	const configPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
 	const configHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
@@ -118,7 +118,7 @@ function transferFile(localFilePath: vscode.Uri, remoteFilePath: string): Thenab
 		}
 		progress.report({ increment: 0, message: `Reading ${localFilePath.fsPath}...` });
 		const data = Buffer.from(await vscode.workspace.fs.readFile(localFilePath));
-		
+
 		if (token.isCancellationRequested) {
 			return;
 		}
@@ -136,7 +136,7 @@ function transferFile(localFilePath: vscode.Uri, remoteFilePath: string): Thenab
 		try {
 			let numTransferred = 0;
 			while (numTransferred !== data.length) {
-				const toTransfer = Math.min(1024*1024, data.length - numTransferred);
+				const toTransfer = Math.min(1024 * 1024, data.length - numTransferred);
 				const subBuffer = data.subarray(numTransferred, numTransferred + toTransfer);
 				await fileService.write(fd, subBuffer, numTransferred);
 				numTransferred = numTransferred + toTransfer;
@@ -144,10 +144,10 @@ function transferFile(localFilePath: vscode.Uri, remoteFilePath: string): Thenab
 				if (token.isCancellationRequested) {
 					return;
 				}
-				progress.report({ increment: toTransfer/data.length*100, message: `${localFilePath.fsPath} to ${destFileString} (${(numTransferred/1024/1024).toFixed(1)} of ${(data.length/1024/1024).toFixed(1)} MB)...` });
+				progress.report({ increment: toTransfer / data.length * 100, message: `${localFilePath.fsPath} to ${destFileString} (${(numTransferred / 1024 / 1024).toFixed(1)} of ${(data.length / 1024 / 1024).toFixed(1)} MB)...` });
 			}
 		} finally {
-			progress.report({ increment: 0, message: `Closing ${destFileString}...`});
+			progress.report({ increment: 0, message: `Closing ${destFileString}...` });
 			await fileService.close(fd);
 		}
 		progress.report({ increment: 0, message: `Copied ${localFilePath.fsPath} to ${destFileString}` });
@@ -159,14 +159,14 @@ let previousDestFileDir: string = "/";
 async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void> {
 	try {
 		if (!filePath) {
-			const selectedFilePath = await vscode.window.showOpenDialog({canSelectFiles: true, canSelectFolders: false, canSelectMany: false});
+			const selectedFilePath = await vscode.window.showOpenDialog({ canSelectFiles: true, canSelectFolders: false, canSelectMany: false });
 			if (!selectedFilePath) {
 				return;
 			}
 			filePath = selectedFilePath[0];
 		}
 
-		const destFileDir = await vscode.window.showInputBox({title: "Type in destination directory", value: previousDestFileDir, ignoreFocusOut: true});
+		const destFileDir = await vscode.window.showInputBox({ title: "Type in destination directory", value: previousDestFileDir, ignoreFocusOut: true });
 
 		if (!destFileDir) {
 			return;
@@ -182,6 +182,28 @@ async function copyFileToTarget(filePath: vscode.Uri | undefined): Promise<void>
 	}
 }
 
+async function createFileOrDirectory(type: vscode.FileType.Directory | vscode.FileType.File, entry: QConnFileExplorerTreeDataEntry | undefined) {
+	let directory = vscode.Uri.parse(`qconnfs://${qConnTargetHost}:${qConnTargetPort}/`);
+	if (entry) {
+		directory = entry.type === vscode.FileType.Directory ?
+			entry.uri :
+			entry.uri.with({ path: nodepath.dirname(entry.uri.path) });
+	} else if (fileExplorerTreeView.selection.length === 1) {
+		directory = fileExplorerTreeView.selection[0].type === vscode.FileType.Directory ?
+			fileExplorerTreeView.selection[0].uri :
+			fileExplorerTreeView.selection[0].uri.with({ path: nodepath.dirname(fileExplorerTreeView.selection[0].uri.path) });
+	}
+
+	const name = await vscode.window.showInputBox({ prompt: "Type name", ignoreFocusOut: true, title: "Type name" });
+	if (name) {
+		const path = vscode.Uri.joinPath(directory, name);
+		if (type === vscode.FileType.File) {
+			fileExplorerTreeDataProvider.createFile(path);
+		} else {
+			fileExplorerTreeDataProvider.createDirectory(path);
+		}
+	}
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
@@ -197,11 +219,13 @@ export function activate(context: vscode.ExtensionContext) {
 	processExplorerTreeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: processExplorerTreeDataProvider });
 
 	fileExplorerTreeView = vscode.window.createTreeView('qConnFileExplorer', { treeDataProvider: fileExplorerTreeDataProvider });
-	vscode.commands.registerCommand('qconnFileExplorer.refreshEntry', () => fileExplorerTreeDataProvider.refresh() );
-	vscode.commands.registerCommand('qconnProcessView.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry) );
-	vscode.commands.registerCommand('qconnProcessView.createFile', (directory) => { fileExplorerTreeDataProvider.createFileIn(directory); });
-	vscode.commands.registerCommand('qconnProcessView.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); });
-	
+	vscode.commands.registerCommand('qconnFileExplorer.refreshEntry', () => fileExplorerTreeDataProvider.refresh());
+	vscode.commands.registerCommand('qconnFileExplorer.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry));
+	vscode.commands.registerCommand('qconnFileExplorer.renameFile', (entry) => fileExplorerTreeDataProvider.rename(entry));
+	vscode.commands.registerCommand('qconnFileExplorer.createFile', (entry) => createFileOrDirectory(vscode.FileType.File, entry));
+	vscode.commands.registerCommand('qconnFileExplorer.createDirectory', (entry) => createFileOrDirectory(vscode.FileType.Directory, entry));
+	vscode.commands.registerCommand('qconnFileExplorer.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); });
+
 	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
 	statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
 	statusBarItem.tooltip = "Click to select QConn target";
@@ -221,11 +245,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	sysInfoUpdater = new SysInfoUpdater(qConnTargetHost, qConnTargetPort, (hostname, memTotal, memFree) => {
 		prevPing = Date.now();
-		const MB = BigInt(1024*1024);
+		const MB = BigInt(1024 * 1024);
 
 		statusBarItem.tooltip = "Click to select QConn target\n" +
-		`Hostname: ${hostname}\n` +
-		`Memory Free ${Number(memFree/MB)}MB / Available ${Number(memTotal/MB)}MB`;
+			`Hostname: ${hostname}\n` +
+			`Memory Free ${Number(memFree / MB)}MB / Available ${Number(memTotal / MB)}MB`;
 	});
 	sysInfoUpdater.startUpdating(5000);
 
