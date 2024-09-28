@@ -25,10 +25,8 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 	}
 
 	async delete(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
-		if (entry.type === vscode.FileType.File) {
-			await this.fileSystemProvider.delete(entry.uri);
-			this.refresh();
-		}
+		await this.fileSystemProvider.delete(entry.uri);
+		this.refresh();
 	}
 
 	async rename(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
