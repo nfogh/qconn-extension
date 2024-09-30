@@ -6,7 +6,6 @@ import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
 import { SysInfoUpdater } from './sysInfoUpdater';
 import * as nodepath from 'path';
 import { QConnFileExplorerTreeDataProvider, QConnFileExplorerTreeDataEntry } from './qconnFileExplorerTreeDataProvider';
-import { create } from 'domain';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
@@ -87,6 +86,8 @@ function configurationUpdated() {
 		qConnTargetHost = configHost;
 		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
 		processExplorerTreeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
+		sysInfoUpdater.setHost(qConnTargetHost, qConnTargetPort);
+		fileExplorerTreeDataProvider.reconnect();
 	}
 }
 
@@ -217,9 +218,10 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
 	context.subscriptions.push(createTerminalProfile());
 	processExplorerTreeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: processExplorerTreeDataProvider });
+	vscode.commands.registerCommand('qconnProcessView.refresh', () => processExplorerTreeDataProvider.reconnect());
 
 	fileExplorerTreeView = vscode.window.createTreeView('qConnFileExplorer', { treeDataProvider: fileExplorerTreeDataProvider });
-	vscode.commands.registerCommand('qconnFileExplorer.refreshEntry', () => fileExplorerTreeDataProvider.refresh());
+	vscode.commands.registerCommand('qconnFileExplorer.refresh', () => fileExplorerTreeDataProvider.reconnect());
 	vscode.commands.registerCommand('qconnFileExplorer.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry));
 	vscode.commands.registerCommand('qconnFileExplorer.renameFile', (entry) => fileExplorerTreeDataProvider.rename(entry));
 	vscode.commands.registerCommand('qconnFileExplorer.createFile', (entry) => createFileOrDirectory(vscode.FileType.File, entry));

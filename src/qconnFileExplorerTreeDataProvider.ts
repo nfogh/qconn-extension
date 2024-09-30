@@ -24,6 +24,12 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		this._onDidChangeTreeData.fire();
 	}
 
+	reconnect(): void {
+		// Create a new file system provider in case the target host or port has changed
+		this.fileSystemProvider = new fileSystemProvider.QConnFileSystemProvider();
+		this.refresh();
+	}
+
 	async delete(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
 		await this.fileSystemProvider.delete(entry.uri);
 		this.refresh();

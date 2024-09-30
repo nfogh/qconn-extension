@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "QNX target file system browser, process explorer and terminal in vs code",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "icon": "resources/icon.png",
   "publisher": "NikolajFogh",
   "engines": {
@@ -63,7 +63,7 @@
         "title": "Copy file to QNX target"
       },
       {
-        "command": "qconnFileExplorer.refreshEntry",
+        "command": "qconnFileExplorer.refresh",
         "title": "Refresh the qconn file explorer",
         "icon": "$(refresh)"
       },
@@ -88,6 +88,11 @@
         "command": "qconnFileExplorer.createDirectory",
         "title": "New folder...",
         "icon": "$(file-directory-create)"
+      },
+      {
+        "command": "qconnProcessView.refresh",
+        "title": "Refresh the qconn processView",
+        "icon": "$(refresh)"
       }
     ],
     "views": {
@@ -147,7 +152,7 @@
       ],
       "view/title": [
         {
-          "command": "qconnFileExplorer.refreshEntry",
+          "command": "qconnFileExplorer.refresh",
           "when": "view == qConnFileExplorer",
           "group": "navigation"
         },
@@ -159,6 +164,11 @@
         {
           "command": "qconnFileExplorer.createFile",
           "when": "view == qConnFileExplorer",
+          "group": "navigation"
+        },
+        {
+          "command": "qconnProcessView.refresh",
+          "when": "view == qConnProcessView",
           "group": "navigation"
         }
       ]

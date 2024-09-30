@@ -2,8 +2,7 @@ import * as vscode from 'vscode';
 import { SInfoService } from 'qconn';
 import { ProcessInfo } from 'qconn/out/sinfoservice';
 
-export class ProcessListProvider implements vscode.TreeDataProvider<Process>
-{
+export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     private processes: Process[] = [];
     private timer: NodeJS.Timeout | undefined;
 
@@ -23,6 +22,16 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
         this.host = host;
         this.port = port;
         this.update();
+    }
+
+    public reconnect() {
+        this.sInfoService?.disconnect();
+        this.sInfoService = undefined; // We will automatically reconnect on the next update
+        this.refresh();
+    }
+
+    public refresh() {
+        this._onDidChangeTreeData.fire();
     }
 
     public setHost(host: string, port: number) {
@@ -61,8 +70,7 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
         }
     }
 
-    public setUpdateIntervalMS(newUpdateIntervalMS: number)
-    {
+    public setUpdateIntervalMS(newUpdateIntervalMS: number) {
         this.updateIntervalMS = newUpdateIntervalMS;
     }
 
@@ -91,13 +99,12 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process>
     }
 }
 
-function formatUTime(uTime: bigint): string
-{
-    const ms =  (uTime / BigInt(             1000000)) % BigInt(1000);
-    const s =   (uTime / BigInt(          1000000000)) % BigInt(1000);
-    const min = (uTime / BigInt(       60*1000000000)) % BigInt(60);
-    const hr =  (uTime / BigInt(    60*60*1000000000)) % BigInt(24);
-    const days = uTime / BigInt( 24*60*60*1000000000);
+function formatUTime(uTime: bigint): string {
+    const ms = (uTime / BigInt(1000000)) % BigInt(1000);
+    const s = (uTime / BigInt(1000000000)) % BigInt(1000);
+    const min = (uTime / BigInt(60 * 1000000000)) % BigInt(60);
+    const hr = (uTime / BigInt(60 * 60 * 1000000000)) % BigInt(24);
+    const days = uTime / BigInt(24 * 60 * 60 * 1000000000);
     let out = "";
     if (days > 0) {
         out += `${days}d `;
@@ -117,9 +124,8 @@ function formatUTime(uTime: bigint): string
     return out;
 }
 
-function formatDate(timestampInNS: bigint)
-{
-    const unixTimestampInMS = Number(timestampInNS/BigInt(1000000));
+function formatDate(timestampInNS: bigint) {
+    const unixTimestampInMS = Number(timestampInNS / BigInt(1000000));
     const date = new Date(unixTimestampInMS);
     const year: number = date.getFullYear();
     const month: number = date.getMonth() + 1;
@@ -132,14 +138,13 @@ function formatDate(timestampInNS: bigint)
 
 }
 
-function formatMemory(memory: number): string
-{
+function formatMemory(memory: number): string {
     const KB = 1024;
-    const MB = 1024*1024
+    const MB = 1024 * 1024
     if (memory <= MB) {
-        return `${(memory/KB).toPrecision(3)} KB`;
+        return `${(memory / KB).toPrecision(3)} KB`;
     } else {
-        return `${(memory/MB).toPrecision(3)} MB`;
+        return `${(memory / MB).toPrecision(3)} MB`;
     }
 }
 
@@ -150,14 +155,14 @@ export class Process extends vscode.TreeItem {
         collapsibleState: vscode.TreeItemCollapsibleState
     ) {
         super(processInfo.path, collapsibleState);
-        this.tooltip = 
-        `Number of threads: ${processInfo.numThreads}\n` +
-        `Number of timers: ${processInfo.numTimers}\n` +
-        `Data: ${formatMemory(processInfo.datasize)}\n` +
-        `Code: ${formatMemory(processInfo.codesize)}\n` +
-        `CPU usage: ${formatUTime(processInfo.uTime)}\n` +
-        `Start time: ${formatDate(processInfo.startTime)}`
-        ;
+        this.tooltip =
+            `Number of threads: ${processInfo.numThreads}\n` +
+            `Number of timers: ${processInfo.numTimers}\n` +
+            `Data: ${formatMemory(processInfo.datasize)}\n` +
+            `Code: ${formatMemory(processInfo.codesize)}\n` +
+            `CPU usage: ${formatUTime(processInfo.uTime)}\n` +
+            `Start time: ${formatDate(processInfo.startTime)}`
+            ;
         this.description = this.pid.toString();
         this.contextValue = "ProcessID";
     }
