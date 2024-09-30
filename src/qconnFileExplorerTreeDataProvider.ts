@@ -72,16 +72,7 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		}
 	}
 
-	async getChildren(element?: QConnFileExplorerTreeDataEntry): Promise<QConnFileExplorerTreeDataEntry[]> {
-		if (element) {
-			const children = await this.fileSystemProvider.readDirectory(element.uri);
-			return children.map(([name, type]) => ({ uri: vscode.Uri.joinPath(element.uri, name), type }));
-		}
-
-		let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
-		let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
-		const uri = vscode.Uri.parse(`qconnfs://${qConnTargetHost}:${qConnTargetPort}/`);
-
+	private async readDirectorySorted(uri: vscode.Uri): Promise<QConnFileExplorerTreeDataEntry[]> {
 		const children = await this.fileSystemProvider.readDirectory(uri);
 		children.sort((a, b) => {
 			if (a[1] === b[1]) {
@@ -90,6 +81,18 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 			return a[1] === vscode.FileType.Directory ? -1 : 1;
 		});
 		return children.map(([name, type]) => ({ uri: vscode.Uri.joinPath(uri, name), type }));
+	}
+
+	async getChildren(element?: QConnFileExplorerTreeDataEntry): Promise<QConnFileExplorerTreeDataEntry[]> {
+		if (element) {
+			return await this.readDirectorySorted(element.uri);
+		}
+
+		let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
+		let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
+		const uri = vscode.Uri.parse(`qconnfs://${qConnTargetHost}:${qConnTargetPort}/`);
+
+		return await this.readDirectorySorted(uri);
 	}
 
 	getTreeItem(element: QConnFileExplorerTreeDataEntry): vscode.TreeItem {
