@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { ElfFileReader } from './elfParser';
 import * as path from 'path';
 import * as glob from 'fast-glob';
+import { log } from './outputChannel';
+import { fdir } from 'fdir';
 
 let toolsDir: string;
 
@@ -58,6 +60,7 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
 
         debugConfiguration.type = "cppdbg";
         debugConfiguration.request = "launch";
+        debugConfiguration.MIMode = "gdb";
 
         if (!debugConfiguration.miDebuggerPath) {
             let gdbPath: string = "";
@@ -78,8 +81,10 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
             }
             if (!(await fileExists(gdbPath))) {
                 vscode.window.showErrorMessage(`Unable to find gdb at ${gdbPath}. Please set the configuration qConn.sdpPath to the path of your QNX sdp`);
+            } else {
+                log(`Found debugger at ${gdbPath}`);
+                debugConfiguration.miDebuggerPath = gdbPath;
             }
-            debugConfiguration.miDebuggerPath = gdbPath;
         }
 
         const linkMap = (await getDependenciesOfCoreFile(debugConfiguration.coreDumpPath));
@@ -87,10 +92,14 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
         // Try to resolve program
         if (!debugConfiguration.program) {
             if (vscode.workspace.workspaceFolders) {
-                const buildId = linkMap.filter(link => link.soName === 'PIE')[0].buildid;
-                const fileName = path.parse(debugConfiguration.coreDumpPath).name;
-                const pattern = path.join(glob.convertPathToPattern(vscode.workspace.workspaceFolders[0].uri.fsPath),"**", fileName);
-                const candidates = await glob.glob(pattern);
+                const programInfo = linkMap.filter(link => link.soName === 'PIE')[0];
+                const buildId = programInfo.buildid;
+                const fileName = path.basename(programInfo.path);
+                const candidates = await (new fdir()
+                    .withBasePath()
+                    .filter(p => path.basename(p) === fileName)
+                    .crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
+                log(`Program candidates are: ${candidates}`);
                 const candidateBuildIds = await Promise.all(candidates.map(async path => { 
                     const buildId = await new ElfFileReader().getBuildID(path);
                     return { path, buildId };
@@ -99,6 +108,7 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
                 const uniqueMatches = candidatesWithMatchingBuildIds.filter((a, index) => candidatesWithMatchingBuildIds.findIndex(b => a.path === b.path) === index);
                 if (uniqueMatches.length !== 0) {
                     debugConfiguration.program = uniqueMatches[0].path;
+                    log(`Resolved program at ${debugConfiguration.program}`);
                 } else {
                     vscode.window.showWarningMessage(`Could not find program ${fileName} with build ID ${buildId}.\nYou can manually set the program path if you want to load this file regardless.`);
                 }
@@ -117,9 +127,11 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
 
             // find all candidates
             if (vscode.workspace.workspaceFolders) {
-                const allDependencyBaseNamesGlobPattern = dependencyBaseNames.join("|");
-                const pattern = path.join(glob.convertPathToPattern(vscode.workspace.workspaceFolders[0].uri.fsPath),"**", allDependencyBaseNamesGlobPattern);
-                const candidates = await glob.glob(pattern);
+                const candidates = await (new fdir()
+                    .withBasePath()
+                    .filter(p => dependencyBaseNames.includes(path.basename(p)))
+                    .crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
+                log(`SO lib candidates are: ${candidates}`);
 
                 const candidateBuildIds = await Promise.all(candidates.map(async path => { 
                     const buildId = await new ElfFileReader().getBuildID(path);
@@ -128,9 +140,12 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
                 const candidatesWithMatchingBuildIds = candidateBuildIds.filter(candidate => candidate.buildId === dependencyMap.get(candidate.path));
                 const uniqueMatches = candidatesWithMatchingBuildIds.filter((a, index) => candidatesWithMatchingBuildIds.findIndex(b => a.path === b.path) === index);
                 const pathsToUniqueCandidates = uniqueMatches.map(match => path.dirname(match.path));
+                log(`Resolved SO libs paths are ${pathsToUniqueCandidates}`);
                 debugConfiguration.additionalSOLibSearchPath = pathsToUniqueCandidates.join(";");
             }
         }
+
+        log(`Final debug configuration is ${JSON.stringify(debugConfiguration)}`);
 
         return debugConfiguration;
     }

@@ -13,8 +13,7 @@ import * as fspromises from 'fs/promises';
 import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as nodestream from 'node:stream/promises';
-
-const outputChannel = vscode.window.createOutputChannel('QConn Extension');
+import * as outputChannel from './outputChannel';
 
 let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
 let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
@@ -24,11 +23,6 @@ let processExplorerTreeDataProvider = new processListProvider.ProcessListProvide
 
 let fileExplorerTreeView: vscode.TreeView<QConnFileExplorerTreeDataEntry>;
 let fileExplorerTreeDataProvider = new QConnFileExplorerTreeDataProvider();
-
-// Log function to write messages to the output channel
-function log(message: string) {
-	outputChannel.appendLine(message);
-}
 
 async function pickTargetPID(host: string, port: number): Promise<number | undefined> {
 	try {
@@ -59,7 +53,7 @@ async function kill(process: processListProvider.Process | undefined) {
 	const pid = process ? process.pid : await pickTargetPID(qConnTargetHost, qConnTargetPort);
 	if (pid !== undefined) {
 		try {
-			log(`Sending SIGKILL to pid ${pid}`);
+			outputChannel.log(`Sending SIGKILL to pid ${pid}`);
 			const service = await CntlService.connect(qConnTargetHost, qConnTargetPort);
 			await service.signalProcess(pid, SignalType.kill);
 			await service.disconnect();
@@ -259,6 +253,7 @@ export async function pickCoreFileOnLocal(): Promise<string | undefined> {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+	outputChannel.activate();
 	console.log('Activating QConn extension');
 
 	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconnfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
@@ -300,6 +295,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
 	statusBar.deactivate();
-	outputChannel.dispose();
+	outputChannel.deactivate();
 }
 
