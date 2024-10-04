@@ -226,13 +226,13 @@
         },
         "initialConfigurations": [
           {
-            "label": "QNX: Remote QNX core dump",
+            "name": "QNX: Remote QNX core dump",
             "type": "qconn-core",
             "request": "launch",
             "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnTarget}\""
           },
           {
-            "label": "QNX: Local core dump debug",
+            "name": "QNX: Local core dump debug",
             "type": "qconn-core",
             "request": "launch",
             "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnLocal}\""
