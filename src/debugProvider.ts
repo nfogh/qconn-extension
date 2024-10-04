@@ -70,7 +70,7 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
                     canSelectFolders: true,
                     canSelectFiles: false,
                     canSelectMany: false,
-                    openLabel: "Select SDP path"
+                    title: "Select SDP path"
                 });
                 if (sdpPaths?.length === 1) {
                     gdbPath = getGDBPathFromSDP(sdpPaths[0].fsPath);
@@ -89,7 +89,7 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
             if (vscode.workspace.workspaceFolders) {
                 const buildId = linkMap.filter(link => link.soName === 'PIE')[0].buildid;
                 const fileName = path.parse(debugConfiguration.coreDumpPath).name;
-                const pattern = glob.convertPathToPattern(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath,"**", fileName));
+                const pattern = path.join(glob.convertPathToPattern(vscode.workspace.workspaceFolders[0].uri.fsPath),"**", fileName);
                 const candidates = await glob.glob(pattern);
                 const candidateBuildIds = await Promise.all(candidates.map(async path => { 
                     const buildId = await new ElfFileReader().getBuildID(path);
@@ -118,7 +118,7 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
             // find all candidates
             if (vscode.workspace.workspaceFolders) {
                 const allDependencyBaseNamesGlobPattern = dependencyBaseNames.join("|");
-                const pattern = glob.convertPathToPattern(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath,"**", allDependencyBaseNamesGlobPattern));
+                const pattern = path.join(glob.convertPathToPattern(vscode.workspace.workspaceFolders[0].uri.fsPath),"**", allDependencyBaseNamesGlobPattern);
                 const candidates = await glob.glob(pattern);
 
                 const candidateBuildIds = await Promise.all(candidates.map(async path => { 

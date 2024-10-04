@@ -10,6 +10,9 @@ import { registerDebugProvider } from './debugProvider';
 import * as qconnUtils from './qconnUtils';
 import * as os from 'os';
 import * as fspromises from 'fs/promises';
+import * as fs from 'fs';
+import * as zlib from 'zlib';
+import * as nodestream from 'node:stream/promises';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
@@ -222,6 +225,18 @@ async function pickCoreFileOnTarget(): Promise<string | undefined> {
 			});
 			const destPath = nodepath.join(os.tmpdir(), selectedCoreDump);
 			await fspromises.writeFile(destPath, data);
+			if (nodepath.parse(destPath).ext === ".gz") {
+				const unzippedPath = nodepath.join(os.tmpdir(), nodepath.parse(selectedCoreDump).name);
+				try {
+					await nodestream.pipeline(
+						fs.createReadStream(destPath),
+						zlib.createGunzip(),
+						fs.createWriteStream(unzippedPath));
+				} catch (error) {
+					vscode.window.showErrorMessage(`Unable to unzip ${destPath}. ${error}`);
+				}
+				return unzippedPath;
+			}
 			return destPath;
 		});
 	} else {
