@@ -4,18 +4,16 @@ export type CallbackType = (hostname: string, memTotal: bigint, memFree: bigint)
 
 export class SysInfoUpdater
 {
-    private timer: NodeJS.Timeout | undefined;
+    private readonly timer: NodeJS.Timeout | undefined;
 
     private host: string;
     private port: number;
-
-    private sInfoService: SInfoService | undefined;
 
     private isUpdating = false;
     private updateIntervalMS: number = 2000;
     private updatePromise: Promise<void> | undefined = undefined;
 
-    private callback: CallbackType;
+    private readonly callback: CallbackType;
     constructor(host: string, port: number, callback: CallbackType) {
         this.host = host;
         this.port = port;
@@ -23,24 +21,22 @@ export class SysInfoUpdater
     }
 
     public setHost(host: string, port: number) {
-        if (this.host !== host || this.port !== port) {
-            this.host = host;
-            this.port = port;
-            this.sInfoService?.disconnect();
-            this.sInfoService = undefined; // We will automatically reconnect on the next update
-        }
+        this.host = host;
+        this.port = port;
     }
 
     private async update(): Promise<void> {
         while (this.isUpdating) {
             try {
-                if (this.sInfoService === undefined) {
-                    this.sInfoService = await SInfoService.connect(this.host, this.port);
+                const sInfoService = await SInfoService.connect(this.host, this.port);
+                try {
+                    const sysInfo = await sInfoService.getSysInfo();
+                    this.callback(sysInfo.hostname, sysInfo.memTotal, sysInfo.memFree);
+                } finally {
+                    sInfoService.disconnect();
                 }
-                const sysInfo = await this.sInfoService.getSysInfo();
-                this.callback(sysInfo.hostname, sysInfo.memTotal, sysInfo.memFree);
             } catch (error) {
-                this.sInfoService = undefined;
+                // Silently discard connection errors
             }
             await new Promise(r => setTimeout(r, this.updateIntervalMS));
         }

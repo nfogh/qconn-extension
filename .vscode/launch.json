@@ -6,6 +6,16 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Launch Program",
+			"program": "${workspaceFolder}/out/programs/elfParser.js",
+			"request": "launch",
+			"args": ["C:\\source\\stc1\\fixstuff\\MainComputer\\Application\\ControlCabinets\\results\\Q5\\Dumps\\WebClient_g.core"],
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"type": "node"
+		},
+		{
 			"name": "Run Extension",
 			"type": "extensionHost",
 			"request": "launch",

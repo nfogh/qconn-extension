@@ -3,9 +3,13 @@ import { CntlService, SignalType, getPids, FileService, OpenFlags, Permissions }
 import * as processListProvider from './processListProvider';
 import { QConnFileSystemProvider } from './qconnFileSystemProvider';
 import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
-import { SysInfoUpdater } from './sysInfoUpdater';
 import * as nodepath from 'path';
 import { QConnFileExplorerTreeDataProvider, QConnFileExplorerTreeDataEntry } from './qconnFileExplorerTreeDataProvider';
+import * as statusBar from './statusBarItem';
+import { registerDebugProvider } from './debugProvider';
+import * as qconnUtils from './qconnUtils';
+import * as os from 'os';
+import * as fspromises from 'fs/promises';
 
 const outputChannel = vscode.window.createOutputChannel('QConn Extension');
 
@@ -17,13 +21,6 @@ let processExplorerTreeDataProvider = new processListProvider.ProcessListProvide
 
 let fileExplorerTreeView: vscode.TreeView<QConnFileExplorerTreeDataEntry>;
 let fileExplorerTreeDataProvider = new QConnFileExplorerTreeDataProvider();
-
-let statusBarItem: vscode.StatusBarItem;
-
-let sysInfoUpdater: SysInfoUpdater;
-
-let prevPing: number = Date.now();
-let pingUpdater: NodeJS.Timeout;
 
 // Log function to write messages to the output channel
 function log(message: string) {
@@ -84,9 +81,8 @@ function configurationUpdated() {
 	if ((configPort !== qConnTargetPort) || (configHost !== qConnTargetHost)) {
 		qConnTargetPort = configPort;
 		qConnTargetHost = configHost;
-		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
+		statusBar.defaultText();
 		processExplorerTreeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
-		sysInfoUpdater.setHost(qConnTargetHost, qConnTargetPort);
 		fileExplorerTreeDataProvider.reconnect();
 	}
 }
@@ -206,6 +202,47 @@ async function createFileOrDirectory(type: vscode.FileType.Directory | vscode.Fi
 	}
 }
 
+async function pickCoreFileOnTarget(): Promise<string | undefined> {
+	const coreDumpPath = vscode.workspace.getConfiguration('qConn').get<string>('coreDumpPath', '/var/dumps');
+	const coreDumps = await qconnUtils.listDir(coreDumpPath, qConnTargetHost, qConnTargetPort);
+	const coreDumpFileNames = coreDumps.map(info => info.name).filter(name => name.includes("core"));
+
+	const selectedCoreDump = await vscode.window.showQuickPick(coreDumpFileNames, { canPickMany: false, title: "Select core dump", ignoreFocusOut: true });
+	if (selectedCoreDump) {
+		const sourceFile = coreDumpPath + "/" + selectedCoreDump;
+		return await vscode.window.withProgress({
+			location: vscode.ProgressLocation.Notification,
+			title: `Transferring ${sourceFile}`,
+			cancellable: true
+		}, async (progress, token) => {
+			let prevPercent: number = 0;
+			const data = await qconnUtils.readFile(sourceFile, qConnTargetHost, qConnTargetPort, (percent) => {
+				progress.report({ increment: percent - prevPercent });
+				prevPercent = percent;
+			});
+			const destPath = nodepath.join(os.tmpdir(), selectedCoreDump);
+			await fspromises.writeFile(destPath, data);
+			return destPath;
+		});
+	} else {
+		return undefined;
+	}
+}
+
+export async function pickCoreFileOnLocal(): Promise<string | undefined> {
+	const corePath = await vscode.window.showOpenDialog({
+		canSelectMany: false,
+		canSelectFolders: false,
+		canSelectFiles: true,
+		title: "Select core dump",
+		filters: { 'Core dumps': ["core"] }
+	});
+	if (corePath?.length === 1) {
+		return corePath[0].fsPath;
+	}
+	return undefined;
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	console.log('Activating QConn extension');
 
@@ -218,22 +255,18 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
 	context.subscriptions.push(createTerminalProfile());
 	processExplorerTreeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: processExplorerTreeDataProvider });
-	vscode.commands.registerCommand('qconnProcessView.refresh', () => processExplorerTreeDataProvider.reconnect());
+	context.subscriptions.push(vscode.commands.registerCommand('qconnProcessView.refresh', () => processExplorerTreeDataProvider.reconnect()));
 
 	fileExplorerTreeView = vscode.window.createTreeView('qConnFileExplorer', { treeDataProvider: fileExplorerTreeDataProvider });
-	vscode.commands.registerCommand('qconnFileExplorer.refresh', () => fileExplorerTreeDataProvider.reconnect());
-	vscode.commands.registerCommand('qconnFileExplorer.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry));
-	vscode.commands.registerCommand('qconnFileExplorer.renameFile', (entry) => fileExplorerTreeDataProvider.rename(entry));
-	vscode.commands.registerCommand('qconnFileExplorer.createFile', (entry) => createFileOrDirectory(vscode.FileType.File, entry));
-	vscode.commands.registerCommand('qconnFileExplorer.createDirectory', (entry) => createFileOrDirectory(vscode.FileType.Directory, entry));
-	vscode.commands.registerCommand('qconnFileExplorer.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); });
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.refresh', () => fileExplorerTreeDataProvider.reconnect()));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.deleteFile', (entry) => fileExplorerTreeDataProvider.delete(entry)));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.renameFile', (entry) => fileExplorerTreeDataProvider.rename(entry)));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.createFile', (entry) => createFileOrDirectory(vscode.FileType.File, entry)));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.createDirectory', (entry) => createFileOrDirectory(vscode.FileType.Directory, entry)));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); }));
 
-	statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left);
-	statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
-	statusBarItem.tooltip = "Click to select QConn target";
-	statusBarItem.command = "qconn.selectQConnTarget";
-	statusBarItem.show();
-	context.subscriptions.push(statusBarItem);
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnTarget', pickCoreFileOnTarget));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnLocal', pickCoreFileOnLocal));
 
 	processExplorerTreeView.onDidChangeVisibility(event => {
 		if (event.visible) {
@@ -243,37 +276,15 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 
+	registerDebugProvider(context);
+
 	vscode.workspace.onDidChangeConfiguration(() => { configurationUpdated(); });
 
-	sysInfoUpdater = new SysInfoUpdater(qConnTargetHost, qConnTargetPort, (hostname, memTotal, memFree) => {
-		prevPing = Date.now();
-		const MB = BigInt(1024 * 1024);
-
-		statusBarItem.tooltip = "Click to select QConn target\n" +
-			`Hostname: ${hostname}\n` +
-			`Memory Free ${Number(memFree / MB)}MB / Available ${Number(memTotal / MB)}MB`;
-	});
-	sysInfoUpdater.startUpdating(5000);
-
-	pingUpdater = setInterval(() => {
-		statusBarItem.text = `QConn@${qConnTargetHost}` + (qConnTargetPort === 8000 ? "" : `:${qConnTargetPort}`);
-
-		if (Date.now() - prevPing > 5000) {
-			statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-			statusBarItem.tooltip =
-				"No response from host for 10s.\n" +
-				"Is qconn running?\n" +
-				"Click to select QConn target";
-		} else {
-			statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.background');
-			// tooltip will be updated by SysInfoUpdater
-		}
-	}, 10000);
+	statusBar.initialize(context);
 }
 
 export function deactivate() {
-	sysInfoUpdater.stopUpdating();
+	statusBar.deactivate();
 	outputChannel.dispose();
-	clearInterval(pingUpdater);
 }
 

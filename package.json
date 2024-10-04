@@ -24,6 +24,10 @@
     "configuration": {
       "title": "QConn",
       "properties": {
+        "qConn.sdpPath": {
+          "type": "string",
+          "description": "The path to your QNX SDP. Needed for debugging."
+        },
         "qConn.target.host": {
           "type": "string",
           "default": "192.168.203.128",
@@ -38,10 +42,23 @@
           "type": "boolean",
           "default": "true",
           "description": "Show QNX system memory usage in the status bar"
+        },
+        "qConn.coreDumpPath": {
+          "type": "string",
+          "default": "/var/dumps",
+          "description": "Location of core dumps on target"
         }
       }
     },
     "commands": [
+      {
+        "command": "qconn.PickCoreFileOnTarget",
+        "title": "Pick a cure dump from target"
+      },
+      {
+        "command": "qconn.PickCoreFileOnLocal",
+        "title": "Pick a core dump from local"
+      },
       {
         "command": "qconn.kill",
         "title": "Kill QNX Process"
@@ -99,11 +116,13 @@
       "explorer": [
         {
           "id": "qConnProcessView",
-          "name": "QNX Processes"
+          "name": "QNX Processes",
+          "contextualTitle": "QNX Processes"
         },
         {
           "id": "qConnFileExplorer",
-          "name": "QNX File Explorer"
+          "name": "QNX File Explorer",
+          "contextualTitle": "QNX File Explorer"
         }
       ]
     },
@@ -172,7 +191,77 @@
           "group": "navigation"
         }
       ]
-    }
+    },
+    "debuggers": [
+      {
+        "type": "qconn-core",
+        "label": "QNX core-dump debugger",
+        "languages": [
+          "cpp"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "coreDumpPath"
+            ],
+            "properties": {
+              "coreDumpPath": {
+                "type": "string",
+                "description": "Location of the core dump file"
+              },
+              "program": {
+                "type": "string",
+                "description": "The program to load symbols from"
+              },
+              "additionalSOLibSearchPath": {
+                "type": "string",
+                "description": "Semicolon separated list of directories to use to search for .so files. Example: \"/dir1;/dir2\"."
+              },
+              "miDebuggerPath": {
+                "type": "string",
+                "description": "Location of the debugger"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "label": "QNX: Remote QNX core dump",
+            "type": "qconn-core",
+            "request": "launch",
+            "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnTarget}\""
+          },
+          {
+            "label": "QNX: Local core dump debug",
+            "type": "qconn-core",
+            "request": "launch",
+            "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnLocal}\""
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "QNX: Remote QNX core dump",
+            "description": "Debug a QNX core dump located on target",
+            "body": {
+              "type": "qconn-core",
+              "request": "launch",
+              "name": "QNX: Remote QNX core dump",
+              "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnTarget}\""
+            }
+          },
+          {
+            "label": "QNX: Local QNX core dump",
+            "description": "Debug a QNX core dump located on your local machine",
+            "body": {
+              "type": "qconn-core",
+              "request": "launch",
+              "name": "QNX: Local QNX core dump",
+              "coreDumpPath": "^\"\\${command:qconn.PickCoreFileOnLocal}\""
+            }
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run esbuild-base -- --minify",
@@ -200,6 +289,8 @@
   },
   "dependencies": {
     "async-mutex": "^0.4.0",
+    "fast-glob": "^3.3.2",
+    "node-bufferreader": "^1.0.1",
     "qconn": "^1.1.3"
   }
 }

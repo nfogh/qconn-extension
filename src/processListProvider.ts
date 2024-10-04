@@ -4,7 +4,6 @@ import { ProcessInfo } from 'qconn/out/sinfoservice';
 
 export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     private processes: Process[] = [];
-    private timer: NodeJS.Timeout | undefined;
 
     private host: string;
     private port: number;
@@ -15,13 +14,13 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
 
     private sInfoService: SInfoService | undefined;
 
-    private _onDidChangeTreeData: vscode.EventEmitter<Process | undefined | null | void> = new vscode.EventEmitter<Process | undefined | null | void>();
+    private readonly _onDidChangeTreeData: vscode.EventEmitter<Process | undefined | null | void> = new vscode.EventEmitter<Process | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<Process | undefined | null | void> = this._onDidChangeTreeData.event;
 
     constructor(host: string, port: number) {
         this.host = host;
         this.port = port;
-        this.update();
+        setTimeout(this.update, this.updateIntervalMS);
     }
 
     public reconnect() {
@@ -45,28 +44,29 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     }
 
     private async update(): Promise<void> {
-        while (this.isUpdating) {
-            try {
-                if (this.sInfoService === undefined) {
-                    this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}` + (this.port === 8000 ? "" : `:${this.port}`) + `...`, -1, vscode.TreeItemCollapsibleState.None)];
-                    this._onDidChangeTreeData.fire();
-                    this.sInfoService = await SInfoService.connect(this.host, this.port);
-                }
-                const processMap = await this.sInfoService.getPids();
-                let processes: Process[] = [];
-                for (const [processID, processInfo] of processMap) {
-                    processes.push(new Process(processInfo, processID, vscode.TreeItemCollapsibleState.None));
-                }
-                this.processes = processes.sort((a, b) => b.pid - a.pid);
-                this._onDidChangeTreeData.fire();
-            } catch (error) {
+        try {
+            if (this.sInfoService === undefined) {
                 this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}` + (this.port === 8000 ? "" : `:${this.port}`) + `...`, -1, vscode.TreeItemCollapsibleState.None)];
-                await this.sInfoService?.disconnect();
-                this.sInfoService = undefined;
                 this._onDidChangeTreeData.fire();
+                this.sInfoService = await SInfoService.connect(this.host, this.port);
             }
-
-            await new Promise(r => setTimeout(r, this.updateIntervalMS));
+            const processMap = await this.sInfoService.getPids();
+            let processes: Process[] = [];
+            for (const [processID, processInfo] of processMap) {
+                processes.push(new Process(processInfo, processID, vscode.TreeItemCollapsibleState.None));
+            }
+            processes.sort((a, b) => b.pid - a.pid);
+            this.processes = processes;
+            this._onDidChangeTreeData.fire();
+        } catch (error) {
+            this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}` + (this.port === 8000 ? "" : `:${this.port}`) + `...`, -1, vscode.TreeItemCollapsibleState.None)];
+            await this.sInfoService?.disconnect();
+            this.sInfoService = undefined;
+            this._onDidChangeTreeData.fire();
+        } finally {
+            if (this.isUpdating) {
+                setTimeout(this.update, this.updateIntervalMS);
+            }
         }
     }
 
@@ -140,7 +140,7 @@ function formatDate(timestampInNS: bigint) {
 
 function formatMemory(memory: number): string {
     const KB = 1024;
-    const MB = 1024 * 1024
+    const MB = 1024 * 1024;
     if (memory <= MB) {
         return `${(memory / KB).toPrecision(3)} KB`;
     } else {
