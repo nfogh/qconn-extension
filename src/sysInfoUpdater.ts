@@ -35,7 +35,7 @@ export class SysInfoUpdater
                 } finally {
                     sInfoService.disconnect();
                 }
-            } catch (error) {
+            } catch {
                 // Silently discard connection errors
             }
             await new Promise(r => setTimeout(r, this.updateIntervalMS));

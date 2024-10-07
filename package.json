@@ -61,7 +61,18 @@
       },
       {
         "command": "qconn.kill",
-        "title": "Kill QNX Process"
+        "title": "Kill QNX Process",
+        "shortTitle": "Kill"
+      },
+      {
+        "command": "qconn.attach",
+        "title": "Attach to QNX process",
+        "shortTitle": "Attach"
+      },
+      {
+        "command": "qconn.debug",
+        "title": "Debug QNX executable",
+        "shortTitle": "Debug"
       },
       {
         "command": "qconn.connectFs",
@@ -140,6 +151,14 @@
         {
           "command": "qconn.kill",
           "when": "view == qConnProcessView && viewItem == ProcessID"
+        },
+        {
+          "command": "qconn.attach",
+          "when": "view == qConnProcessView && viewItem == ProcessID"
+        },
+        {
+          "command": "qconn.debug",
+          "when": "view == qConnFileExplorer && viewItem == file"
         },
         {
           "command": "qconnFileExplorer.deleteFile",

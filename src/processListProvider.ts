@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { SInfoService } from 'qconn';
 import { ProcessInfo } from 'qconn/out/sinfoservice';
+import * as outputChannel from './outputChannel';
 
 export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     private processes: Process[] = [];
@@ -8,11 +9,8 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     private host: string;
     private port: number;
 
-    private isUpdating = false;
     private updateIntervalMS = 2000;
-    private updatePromise: Promise<void> | undefined = undefined;
-
-    private sInfoService: SInfoService | undefined;
+    private timeout: NodeJS.Timeout | undefined;
 
     private readonly _onDidChangeTreeData: vscode.EventEmitter<Process | undefined | null | void> = new vscode.EventEmitter<Process | undefined | null | void>();
     readonly onDidChangeTreeData: vscode.Event<Process | undefined | null | void> = this._onDidChangeTreeData.event;
@@ -20,53 +18,45 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     constructor(host: string, port: number) {
         this.host = host;
         this.port = port;
-        setTimeout(this.update, this.updateIntervalMS);
-    }
-
-    public reconnect() {
-        this.sInfoService?.disconnect();
-        this.sInfoService = undefined; // We will automatically reconnect on the next update
-        this.refresh();
     }
 
     public refresh() {
-        this._onDidChangeTreeData.fire();
+        outputChannel.log("Refreshing process list");
+        clearTimeout(this.timeout);
+        this.timeout = setTimeout(this.update.bind(this), 0);
     }
 
     public setHost(host: string, port: number) {
         if (this.host !== host || this.port !== port) {
             this.host = host;
             this.port = port;
-            this.sInfoService?.disconnect();
-            this.sInfoService = undefined; // We will automatically reconnect on the next update
-            this.update();
         }
     }
 
     private async update(): Promise<void> {
+        let fastUpdate = false; // If we detect a change in the number of processes, update a bit faster
         try {
-            if (this.sInfoService === undefined) {
-                this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}` + (this.port === 8000 ? "" : `:${this.port}`) + `...`, -1, vscode.TreeItemCollapsibleState.None)];
+            const sInfoService = await SInfoService.connect(this.host, this.port);
+            try {
+                const processMap = await sInfoService.getPids();
+                let processes: Process[] = [];
+                for (const [processID, processInfo] of processMap) {
+                    processes.push(new Process(processInfo, processID, vscode.TreeItemCollapsibleState.None));
+                }
+                processes.sort((a, b) => b.pid - a.pid);
+                if (this.processes.length !== processes.length) {
+                    fastUpdate = true;
+                }
+                this.processes = processes;
                 this._onDidChangeTreeData.fire();
-                this.sInfoService = await SInfoService.connect(this.host, this.port);
+            } finally {
+                sInfoService.disconnect();
             }
-            const processMap = await this.sInfoService.getPids();
-            let processes: Process[] = [];
-            for (const [processID, processInfo] of processMap) {
-                processes.push(new Process(processInfo, processID, vscode.TreeItemCollapsibleState.None));
-            }
-            processes.sort((a, b) => b.pid - a.pid);
-            this.processes = processes;
-            this._onDidChangeTreeData.fire();
-        } catch (error) {
+        } catch {
             this.processes = [new StatusLabel(`Connecting to qconn on ${this.host}` + (this.port === 8000 ? "" : `:${this.port}`) + `...`, -1, vscode.TreeItemCollapsibleState.None)];
-            await this.sInfoService?.disconnect();
-            this.sInfoService = undefined;
             this._onDidChangeTreeData.fire();
         } finally {
-            if (this.isUpdating) {
-                setTimeout(this.update, this.updateIntervalMS);
-            }
+            this.timeout = setTimeout(this.update.bind(this), fastUpdate ? 500 : this.updateIntervalMS);
         }
     }
 
@@ -75,18 +65,18 @@ export class ProcessListProvider implements vscode.TreeDataProvider<Process> {
     }
 
     async stopUpdating() {
-        if (this.updatePromise) {
-            this.isUpdating = false;
-            await this.updatePromise;
-            this.updatePromise = undefined;
+        if (this.timeout) {
+            outputChannel.log("Stopping update of process list");
+            clearTimeout(this.timeout);
+            this.timeout = undefined;
         }
     }
 
-    startUpdating(updateIntervalMS: number = 5000) {
-        if (!this.updatePromise) {
-            this.isUpdating = true;
+    async startUpdating(updateIntervalMS: number = 5000) {
+        if (!this.timeout) {
+            outputChannel.log("Starting update of process list");
             this.updateIntervalMS = updateIntervalMS;
-            this.updatePromise = this.update();
+            this.timeout = setTimeout(this.update.bind(this), 0);
         }
     }
 

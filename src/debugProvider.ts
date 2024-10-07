@@ -1,9 +1,10 @@
 import * as vscode from 'vscode';
 import { ElfFileReader } from './elfParser';
 import * as path from 'path';
-import * as glob from 'fast-glob';
 import { log } from './outputChannel';
 import { fdir } from 'fdir';
+import { fileExists } from './util';
+import { getGDBPathFromSDP, getDependenciesOfCoreFile, resolveDependencies } from './debug';
 
 let toolsDir: string;
 
@@ -14,36 +15,6 @@ interface CoreDebugConfiguration extends vscode.DebugConfiguration
     additionalSOLibSearchPath?: string;
     miDebuggerPath?: string
 };
-
-interface Dependency {
-    path: string;
-    soName: string;
-    buildid: string;
-}
-
-async function getDependenciesOfCoreFile(coreFilePath: string): Promise<Dependency[]>
-{
-    const elfFileReader = new ElfFileReader();
-    const linkMaps = await elfFileReader.getLinkMap(coreFilePath);
-    return linkMaps.map(map => { return {path: map.path, soName: map.soName, buildid: map.buildid}; } );
-}
-
-async function fileExists(path: string) : Promise<boolean> {
-    try {
-        await vscode.workspace.fs.stat(vscode.Uri.file(path));
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function getGDBPathFromSDP(sdpPath: string): string {
-    if (process.platform === "win32") {
-        return path.join(sdpPath, "usr", "bin", "ntox86_64-gdb.exe");
-    } else {
-        return path.join(sdpPath, "usr", "bin", "ntox86_64-gdb");
-    }
-}
 
 class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
     public resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, debugConfiguration: CoreDebugConfiguration, token?: vscode.CancellationToken): vscode.ProviderResult<vscode.DebugConfiguration>
@@ -122,27 +93,10 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
         // Try to resolve additional .so lib paths
         if (!debugConfiguration.additionalSOLibSearchPath) {
             const dependencies = linkMap.filter(link => link.soName !== 'PIE');
-            const dependencyMap = new Map(dependencies.map(dependency => [dependency.soName, dependency.buildid]));
-            const dependencyBaseNames = dependencies.map(dependency => dependency.soName);
-
-            // find all candidates
-            if (vscode.workspace.workspaceFolders) {
-                const candidates = await (new fdir()
-                    .withBasePath()
-                    .filter(p => dependencyBaseNames.includes(path.basename(p)))
-                    .crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
-                log(`SO lib candidates are: ${candidates}`);
-
-                const candidateBuildIds = await Promise.all(candidates.map(async path => { 
-                    const buildId = await new ElfFileReader().getBuildID(path);
-                    return { path, buildId };
-                }));
-                const candidatesWithMatchingBuildIds = candidateBuildIds.filter(candidate => candidate.buildId === dependencyMap.get(candidate.path));
-                const uniqueMatches = candidatesWithMatchingBuildIds.filter((a, index) => candidatesWithMatchingBuildIds.findIndex(b => a.path === b.path) === index);
-                const pathsToUniqueCandidates = uniqueMatches.map(match => path.dirname(match.path));
-                log(`Resolved SO libs paths are ${pathsToUniqueCandidates}`);
+            const resolvedDependencies = await resolveDependencies(dependencies);
+            const pathsToUniqueCandidates = resolvedDependencies.map(resolvedDependency => path.dirname(resolvedDependency));
+            log(`Resolved SO libs paths are ${pathsToUniqueCandidates}`);
                 debugConfiguration.additionalSOLibSearchPath = pathsToUniqueCandidates.join(";");
-            }
         }
 
         log(`Final debug configuration is ${JSON.stringify(debugConfiguration)}`);

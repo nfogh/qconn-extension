@@ -14,12 +14,13 @@ import * as fs from 'fs';
 import * as zlib from 'zlib';
 import * as nodestream from 'node:stream/promises';
 import * as outputChannel from './outputChannel';
+import * as debugTools from './debug';
 
 let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
 let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
 
 let processExplorerTreeView: vscode.TreeView<processListProvider.Process>;
-let processExplorerTreeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
+let processExplorerTreeDataProvider: processListProvider.ProcessListProvider;
 
 let fileExplorerTreeView: vscode.TreeView<QConnFileExplorerTreeDataEntry>;
 let fileExplorerTreeDataProvider = new QConnFileExplorerTreeDataProvider();
@@ -49,7 +50,7 @@ async function pickTargetPID(host: string, port: number): Promise<number | undef
 	}
 }
 
-async function kill(process: processListProvider.Process | undefined) {
+async function kill(process: processListProvider.Process | undefined): Promise<void> {
 	const pid = process ? process.pid : await pickTargetPID(qConnTargetHost, qConnTargetPort);
 	if (pid !== undefined) {
 		try {
@@ -57,6 +58,8 @@ async function kill(process: processListProvider.Process | undefined) {
 			const service = await CntlService.connect(qConnTargetHost, qConnTargetPort);
 			await service.signalProcess(pid, SignalType.kill);
 			await service.disconnect();
+			// Do a quick update of the process explorer
+			setTimeout(() => { processExplorerTreeDataProvider.refresh(); }, 500);
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to kill process ${pid}: ${error}`);
 		}
@@ -251,11 +254,36 @@ export async function pickCoreFileOnLocal(): Promise<string | undefined> {
 	}
 	return undefined;
 }
+export async function debug(treeDataEntry: QConnFileExplorerTreeDataEntry | undefined): Promise<void>
+{
+	let executablePath = treeDataEntry ? treeDataEntry.uri.path : undefined;
+	if (!executablePath) {
+		return;
+	}
+
+	debugTools.debug(executablePath, qConnTargetHost, qConnTargetPort);
+}
+
+async function attach(context: processListProvider.Process | undefined) : Promise<void>
+{
+	if (!context || !context.label) {
+		return;
+	}
+
+	const pid = Number(context.pid);
+	const qnxPath = context.label.toString();
+
+	return debugTools.attach(pid, qnxPath, qConnTargetHost, qConnTargetPort);
+}
 
 export function activate(context: vscode.ExtensionContext) {
-	outputChannel.activate();
 	console.log('Activating QConn extension');
+	outputChannel.activate();
+	outputChannel.log('Activating QConn extension');
 
+	qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
+	qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
+	
 	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconnfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.kill', kill));
@@ -264,8 +292,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.copyFileToTarget', copyFileToTarget));
 	context.subscriptions.push(createTerminalProfile());
+	processExplorerTreeDataProvider = new processListProvider.ProcessListProvider(qConnTargetHost, qConnTargetPort);
 	processExplorerTreeView = vscode.window.createTreeView('qConnProcessView', { treeDataProvider: processExplorerTreeDataProvider });
-	context.subscriptions.push(vscode.commands.registerCommand('qconnProcessView.refresh', () => processExplorerTreeDataProvider.reconnect()));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnProcessView.refresh', () => processExplorerTreeDataProvider.refresh()));
 
 	fileExplorerTreeView = vscode.window.createTreeView('qConnFileExplorer', { treeDataProvider: fileExplorerTreeDataProvider });
 	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.refresh', () => fileExplorerTreeDataProvider.reconnect()));
@@ -278,6 +307,9 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnTarget', pickCoreFileOnTarget));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnLocal', pickCoreFileOnLocal));
 
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.attach', attach));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.debug', debug));
+
 	processExplorerTreeView.onDidChangeVisibility(event => {
 		if (event.visible) {
 			processExplorerTreeDataProvider.startUpdating();
@@ -285,6 +317,9 @@ export function activate(context: vscode.ExtensionContext) {
 			processExplorerTreeDataProvider.stopUpdating();
 		}
 	});
+	if (processExplorerTreeView.visible) {
+		processExplorerTreeDataProvider.startUpdating();
+	}
 
 	registerDebugProvider(context);
 

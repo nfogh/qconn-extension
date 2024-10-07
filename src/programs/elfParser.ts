@@ -12,7 +12,7 @@ const elfFilePath = process.argv[2];
 console.log(`Parsing ${elfFilePath}\n`);
 
 const elfFileReader = new elfParser.ElfFileReader();
-elfFileReader.getLinkMap(elfFilePath);
+console.log(await elfFileReader.getNeededLibs(elfFilePath));
 
 }
 

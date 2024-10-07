@@ -17,7 +17,7 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		this.fileSystemProvider = new fileSystemProvider.QConnFileSystemProvider();
 	}
 
-	private _onDidChangeTreeData: vscode.EventEmitter<EventType> = new vscode.EventEmitter<EventType>();
+	private readonly _onDidChangeTreeData: vscode.EventEmitter<EventType> = new vscode.EventEmitter<EventType>();
 	readonly onDidChangeTreeData: vscode.Event<EventType> = this._onDidChangeTreeData.event;
 
 	refresh(): void {

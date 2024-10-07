@@ -9,7 +9,7 @@
 			"name": "Launch Program",
 			"program": "${workspaceFolder}/out/programs/elfParser.js",
 			"request": "launch",
-			"args": ["C:\\source\\stc1\\fixstuff\\MainComputer\\Application\\ControlCabinets\\results\\Q5\\Dumps\\WebClient_g.core"],
+			"args": [""],
 			"skipFiles": [
 				"<node_internals>/**"
 			],
