@@ -3,11 +3,16 @@ import * as fileSystemProvider from './qconnFileSystemProvider';
 import path from 'path';
 
 export interface QConnFileExplorerTreeDataEntry {
-	uri: vscode.Uri;
+	resourceUri: vscode.Uri;
 	type: vscode.FileType;
 }
 
 type EventType = QConnFileExplorerTreeDataEntry | undefined | null | void;
+
+interface CopyToHostParams {
+	sourcePath: vscode.Uri;
+	destPath: vscode.Uri;
+};
 
 export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvider<QConnFileExplorerTreeDataEntry> {
 	private fileSystemProvider: fileSystemProvider.QConnFileSystemProvider;
@@ -31,19 +36,17 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 	}
 
 	async delete(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
-		await this.fileSystemProvider.delete(entry.uri);
+		await this.fileSystemProvider.delete(entry.resourceUri);
 		this.refresh();
 	}
 
 	async rename(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
-		if (entry.type === vscode.FileType.File) {
-			const fileName = await vscode.window.showInputBox({ prompt: "Type name of file", ignoreFocusOut: false, placeHolder: path.basename(entry.uri.path), title: "Type name of file" });
-			if (fileName) {
-				const newPath = path.join(path.dirname(entry.uri.path), fileName);
-				const newUri = entry.uri.with({ path: newPath });
-				this.fileSystemProvider.rename(entry.uri, newUri, { overwrite: false });
-				this.refresh();
-			}
+		const newName = await vscode.window.showInputBox({ prompt: "Type new name", ignoreFocusOut: false, value: path.basename(entry.resourceUri.path), title: "Type new name" });
+		if (newName) {
+			const newPath = path.join(path.dirname(entry.resourceUri.path), newName);
+			const newUri = entry.resourceUri.with({ path: newPath });
+			this.fileSystemProvider.rename(entry.resourceUri, newUri, { overwrite: false });
+			this.refresh();
 		}
 	}
 
@@ -57,18 +60,48 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 		this.refresh();
 	}
 
-	async copyFileToHost(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
-		if (entry.type === vscode.FileType.File) {
-			if (!this.prevDestDir && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-				this.prevDestDir = vscode.workspace.workspaceFolders[0].uri;
-			}
+	async copyFileToHost({sourcePath, destPath}: CopyToHostParams): Promise<void>
+	{
+		const data = await this.fileSystemProvider.readFile(sourcePath);
+		await vscode.workspace.fs.writeFile(destPath, data);
+	}
 
-			const destDir = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: this.prevDestDir, title: "Select directory to transfer to" });
-			if (destDir) {
-				const data = await this.fileSystemProvider.readFile(entry.uri);
-				await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(destDir[0], path.basename(entry.uri.path)), data);
-				this.prevDestDir = destDir[0];
+	async copyDirectoryToHost({sourcePath, destPath}: CopyToHostParams): Promise<void>
+	{
+		await vscode.workspace.fs.createDirectory(destPath);
+		const entries = await this.fileSystemProvider.readDirectory(sourcePath);
+		for (const entry of entries) {
+			if (entry[1] === vscode.FileType.Directory) {
+				await this.copyDirectoryToHost({
+					sourcePath: vscode.Uri.joinPath(sourcePath, entry[0]), 
+					destPath: vscode.Uri.joinPath(destPath, entry[0])});
+			} else {
+				await this.copyFileToHost({
+					sourcePath: vscode.Uri.joinPath(sourcePath, entry[0]),
+					destPath: vscode.Uri.joinPath(destPath, entry[0])});
 			}
+		}
+	}
+
+	async copyToHost(entry: QConnFileExplorerTreeDataEntry): Promise<void> {
+		if (!this.prevDestDir && vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+			this.prevDestDir = vscode.workspace.workspaceFolders[0].uri;
+		}
+
+		const destDir = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, defaultUri: this.prevDestDir, title: "Select directory to transfer to" });
+		if (!destDir) {
+			return;
+		}
+		this.prevDestDir = destDir[0];
+
+		if (entry.type === vscode.FileType.File) {
+			await this.copyFileToHost({
+				sourcePath: entry.resourceUri,
+				destPath: vscode.Uri.joinPath(destDir[0], path.basename(entry.resourceUri.path))});
+		} else if (entry.type === vscode.FileType.Directory) {
+			this.copyDirectoryToHost({
+				sourcePath: entry.resourceUri,
+				destPath: vscode.Uri.joinPath(destDir[0], path.basename(entry.resourceUri.path))});
 		}
 	}
 
@@ -80,12 +113,12 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 			}
 			return a[1] === vscode.FileType.Directory ? -1 : 1;
 		});
-		return children.map(([name, type]) => ({ uri: vscode.Uri.joinPath(uri, name), type }));
+		return children.map(([name, type]) => ({ resourceUri: vscode.Uri.joinPath(uri, name), type }));
 	}
 
 	async getChildren(element?: QConnFileExplorerTreeDataEntry): Promise<QConnFileExplorerTreeDataEntry[]> {
 		if (element) {
-			return await this.readDirectorySorted(element.uri);
+			return await this.readDirectorySorted(element.resourceUri);
 		}
 
 		let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
@@ -96,10 +129,14 @@ export class QConnFileExplorerTreeDataProvider implements vscode.TreeDataProvide
 	}
 
 	getTreeItem(element: QConnFileExplorerTreeDataEntry): vscode.TreeItem {
-		const treeItem = new vscode.TreeItem(element.uri, element.type === vscode.FileType.Directory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
+		const treeItem = new vscode.TreeItem(element.resourceUri, element.type === vscode.FileType.Directory ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
 		if (element.type === vscode.FileType.File) {
-			treeItem.command = { command: 'vscode.open', title: "Open File", arguments: [element.uri], };
-			treeItem.contextValue = 'file';
+			treeItem.command = { command: 'vscode.open', title: "Open File", arguments: [element.resourceUri], };
+			if (element.resourceUri.fsPath.endsWith('.core') || element.resourceUri.fsPath.endsWith('.core.gz')) {
+				treeItem.contextValue = 'coredump';
+			} else {
+				treeItem.contextValue = 'file';
+			}
 		} else if (element.type === vscode.FileType.Directory) {
 			treeItem.contextValue = "directory";
 		}

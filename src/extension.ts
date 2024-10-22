@@ -6,7 +6,7 @@ import { createQConnTerminal, createTerminalProfile } from './qconnTerminal';
 import * as nodepath from 'path';
 import { QConnFileExplorerTreeDataProvider, QConnFileExplorerTreeDataEntry } from './qconnFileExplorerTreeDataProvider';
 import * as statusBar from './statusBarItem';
-import { registerDebugProvider } from './debugProvider';
+import * as debugProvider from './debugProvider';
 import * as qconnUtils from './qconnUtils';
 import * as os from 'os';
 import * as fspromises from 'fs/promises';
@@ -15,6 +15,7 @@ import * as zlib from 'zlib';
 import * as nodestream from 'node:stream/promises';
 import * as outputChannel from './outputChannel';
 import * as debugTools from './debug';
+import { startFindSDPPaths } from './sdpPaths';
 
 let qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
 let qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
@@ -50,19 +51,31 @@ async function pickTargetPID(host: string, port: number): Promise<number | undef
 	}
 }
 
+async function sendsignal(pid: number, signal: SignalType): Promise<void>
+{
+	try {
+		outputChannel.log(`Sending signal ${signal} to pid ${pid}`);
+		const service = await CntlService.connect(qConnTargetHost, qConnTargetPort);
+		await service.signalProcess(pid, signal);
+		await service.disconnect();
+		// Do a quick update of the process explorer
+		setTimeout(() => { processExplorerTreeDataProvider.refresh(); }, 500);
+	} catch (error) {
+		vscode.window.showErrorMessage(`Failed to send signal ${signal} process ${pid}: ${error}`);
+	}
+}
+
 async function kill(process: processListProvider.Process | undefined): Promise<void> {
 	const pid = process ? process.pid : await pickTargetPID(qConnTargetHost, qConnTargetPort);
 	if (pid !== undefined) {
-		try {
-			outputChannel.log(`Sending SIGKILL to pid ${pid}`);
-			const service = await CntlService.connect(qConnTargetHost, qConnTargetPort);
-			await service.signalProcess(pid, SignalType.kill);
-			await service.disconnect();
-			// Do a quick update of the process explorer
-			setTimeout(() => { processExplorerTreeDataProvider.refresh(); }, 500);
-		} catch (error) {
-			vscode.window.showErrorMessage(`Failed to kill process ${pid}: ${error}`);
-		}
+		sendsignal(pid, SignalType.kill);
+	}
+}
+
+async function sigint(process: processListProvider.Process | undefined): Promise<void> {
+	const pid = process ? process.pid : await pickTargetPID(qConnTargetHost, qConnTargetPort);
+	if (pid !== undefined) {
+		sendsignal(pid, SignalType.int);
 	}
 }
 
@@ -73,17 +86,21 @@ async function connectFs(): Promise<void> {
 	});
 }
 
-function configurationUpdated() {
-	let dirty = false;
-	const configPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
-	const configHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
+function configurationUpdated(event: vscode.ConfigurationChangeEvent) {
 
-	if ((configPort !== qConnTargetPort) || (configHost !== qConnTargetHost)) {
-		qConnTargetPort = configPort;
-		qConnTargetHost = configHost;
+	if (event.affectsConfiguration("qConn.target.port") || event.affectsConfiguration("qConn.target.host")) {
+		qConnTargetPort = vscode.workspace.getConfiguration("qConn").get<number>("target.port", 8000);
+		qConnTargetHost = vscode.workspace.getConfiguration("qConn").get<string>("target.host", "127.0.0.1");
 		statusBar.defaultText();
 		processExplorerTreeDataProvider.setHost(qConnTargetHost, qConnTargetPort);
 		fileExplorerTreeDataProvider.reconnect();
+	}
+
+	if (event.affectsConfiguration("qConn.sdpSearchPaths")) {
+		const sdpSearchPaths = vscode.workspace.getConfiguration('qConn').get<string[]>('sdpSearchPaths');
+		if (sdpSearchPaths) {
+			startFindSDPPaths(sdpSearchPaths);
+		}
 	}
 }
 
@@ -183,12 +200,12 @@ async function createFileOrDirectory(type: vscode.FileType.Directory | vscode.Fi
 	let directory = vscode.Uri.parse(`qconnfs://${qConnTargetHost}:${qConnTargetPort}/`);
 	if (entry) {
 		directory = entry.type === vscode.FileType.Directory ?
-			entry.uri :
-			entry.uri.with({ path: nodepath.dirname(entry.uri.path) });
+			entry.resourceUri :
+			entry.resourceUri.with({ path: nodepath.dirname(entry.resourceUri.path) });
 	} else if (fileExplorerTreeView.selection.length === 1) {
 		directory = fileExplorerTreeView.selection[0].type === vscode.FileType.Directory ?
-			fileExplorerTreeView.selection[0].uri :
-			fileExplorerTreeView.selection[0].uri.with({ path: nodepath.dirname(fileExplorerTreeView.selection[0].uri.path) });
+			fileExplorerTreeView.selection[0].resourceUri :
+			fileExplorerTreeView.selection[0].resourceUri.with({ path: nodepath.dirname(fileExplorerTreeView.selection[0].resourceUri.path) });
 	}
 
 	const name = await vscode.window.showInputBox({ prompt: "Type name", ignoreFocusOut: true, title: "Type name" });
@@ -202,6 +219,37 @@ async function createFileOrDirectory(type: vscode.FileType.Directory | vscode.Fi
 	}
 }
 
+async function transferCoreFile(sourcePath: string): Promise<string | undefined>
+{
+	return await vscode.window.withProgress({
+		location: vscode.ProgressLocation.Notification,
+		title: `Transferring ${sourcePath}`,
+		cancellable: true
+	}, async (progress, token) => {
+		let prevPercent: number = 0;
+		const data = await qconnUtils.readFile(sourcePath, qConnTargetHost, qConnTargetPort, (percent) => {
+			progress.report({ increment: percent - prevPercent });
+			prevPercent = percent;
+		});
+		const destPath = nodepath.join(os.tmpdir(), nodepath.basename(sourcePath));
+		await fspromises.writeFile(destPath, data);
+		if (nodepath.parse(destPath).ext === ".gz") {
+			const unzippedPath = nodepath.join(os.tmpdir(), nodepath.parse(nodepath.basename(sourcePath)).name);
+			try {
+				progress.report({message: "Unpacking core file..."});
+				await nodestream.pipeline(
+					fs.createReadStream(destPath),
+					zlib.createGunzip(),
+					fs.createWriteStream(unzippedPath));
+			} catch (error) {
+				vscode.window.showErrorMessage(`Unable to unzip ${destPath}. ${error}`);
+			}
+			return unzippedPath;
+		}
+		return destPath;
+	});
+}
+
 async function pickCoreFileOnTarget(): Promise<string | undefined> {
 	const coreDumpPath = vscode.workspace.getConfiguration('qConn').get<string>('coreDumpPath', '/var/dumps');
 	const coreDumps = await qconnUtils.listDir(coreDumpPath, qConnTargetHost, qConnTargetPort);
@@ -209,33 +257,7 @@ async function pickCoreFileOnTarget(): Promise<string | undefined> {
 
 	const selectedCoreDump = await vscode.window.showQuickPick(coreDumpFileNames, { canPickMany: false, title: "Select core dump", ignoreFocusOut: true });
 	if (selectedCoreDump) {
-		const sourceFile = coreDumpPath + "/" + selectedCoreDump;
-		return await vscode.window.withProgress({
-			location: vscode.ProgressLocation.Notification,
-			title: `Transferring ${sourceFile}`,
-			cancellable: true
-		}, async (progress, token) => {
-			let prevPercent: number = 0;
-			const data = await qconnUtils.readFile(sourceFile, qConnTargetHost, qConnTargetPort, (percent) => {
-				progress.report({ increment: percent - prevPercent });
-				prevPercent = percent;
-			});
-			const destPath = nodepath.join(os.tmpdir(), selectedCoreDump);
-			await fspromises.writeFile(destPath, data);
-			if (nodepath.parse(destPath).ext === ".gz") {
-				const unzippedPath = nodepath.join(os.tmpdir(), nodepath.parse(selectedCoreDump).name);
-				try {
-					await nodestream.pipeline(
-						fs.createReadStream(destPath),
-						zlib.createGunzip(),
-						fs.createWriteStream(unzippedPath));
-				} catch (error) {
-					vscode.window.showErrorMessage(`Unable to unzip ${destPath}. ${error}`);
-				}
-				return unzippedPath;
-			}
-			return destPath;
-		});
+		return await transferCoreFile(coreDumpPath + "/" + selectedCoreDump);
 	} else {
 		return undefined;
 	}
@@ -254,9 +276,10 @@ export async function pickCoreFileOnLocal(): Promise<string | undefined> {
 	}
 	return undefined;
 }
+
 export async function debug(treeDataEntry: QConnFileExplorerTreeDataEntry | undefined): Promise<void>
 {
-	let executablePath = treeDataEntry ? treeDataEntry.uri.path : undefined;
+	let executablePath = treeDataEntry ? treeDataEntry.resourceUri.path : undefined;
 	if (!executablePath) {
 		return;
 	}
@@ -264,14 +287,46 @@ export async function debug(treeDataEntry: QConnFileExplorerTreeDataEntry | unde
 	debugTools.debug(executablePath, qConnTargetHost, qConnTargetPort);
 }
 
+export async function debug_corefile(treeDataEntry: QConnFileExplorerTreeDataEntry | undefined): Promise<void>
+{
+	if (!treeDataEntry) {
+		return;
+	}
+
+	let coreFilePath = treeDataEntry.resourceUri.path;
+
+	if (treeDataEntry.resourceUri.scheme === "qconnfs") {
+		const downloadedPath = await transferCoreFile(coreFilePath);
+		if (!downloadedPath) {
+			return;
+		}
+		coreFilePath = downloadedPath;
+	}
+
+	const configuration: debugProvider.CoreDebugConfiguration = {
+		type: "qconn-core",
+		name:"core dump",
+		request: "launch",
+		coreDumpPath: coreFilePath
+	};
+
+	const provider = new debugProvider.CoreDebugConfigurationProvider();
+	if (provider.resolveDebugConfigurationWithSubstitutedVariables) {
+		const resolvedConfiguration = await provider.resolveDebugConfigurationWithSubstitutedVariables(undefined, configuration);
+		if (resolvedConfiguration) {
+			vscode.debug.startDebugging(undefined, resolvedConfiguration);
+		}
+	}
+}
+
 async function attach(context: processListProvider.Process | undefined) : Promise<void>
 {
-	if (!context || !context.label) {
+	if (context?.label === undefined) {
 		return;
 	}
 
 	const pid = Number(context.pid);
-	const qnxPath = context.label.toString();
+	const qnxPath = typeof context.label === 'string'? context.label : context.label.label;
 
 	return debugTools.attach(pid, qnxPath, qConnTargetHost, qConnTargetPort);
 }
@@ -287,6 +342,7 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.workspace.registerFileSystemProvider('qconnfs', new QConnFileSystemProvider(), { isCaseSensitive: true }));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.kill', kill));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.sigint', sigint));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.connectFs', connectFs));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.createQConnTerminal', () => { createQConnTerminal(qConnTargetHost, qConnTargetPort); }));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.selectQConnTarget', () => { selectQConnTarget(); }));
@@ -302,13 +358,14 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.renameFile', (entry) => fileExplorerTreeDataProvider.rename(entry)));
 	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.createFile', (entry) => createFileOrDirectory(vscode.FileType.File, entry)));
 	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.createDirectory', (entry) => createFileOrDirectory(vscode.FileType.Directory, entry)));
-	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.copyFile', (entry) => { fileExplorerTreeDataProvider.copyFileToHost(entry); }));
+	context.subscriptions.push(vscode.commands.registerCommand('qconnFileExplorer.copyToHost', (entry) => { fileExplorerTreeDataProvider.copyToHost(entry); }));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnTarget', pickCoreFileOnTarget));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.PickCoreFileOnLocal', pickCoreFileOnLocal));
 
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.attach', attach));
 	context.subscriptions.push(vscode.commands.registerCommand('qconn.debug', debug));
+	context.subscriptions.push(vscode.commands.registerCommand('qconn.debug_corefile', debug_corefile));
 
 	processExplorerTreeView.onDidChangeVisibility(event => {
 		if (event.visible) {
@@ -321,11 +378,16 @@ export function activate(context: vscode.ExtensionContext) {
 		processExplorerTreeDataProvider.startUpdating();
 	}
 
-	registerDebugProvider(context);
+	debugProvider.registerDebugProvider(context);
 
-	vscode.workspace.onDidChangeConfiguration(() => { configurationUpdated(); });
+	vscode.workspace.onDidChangeConfiguration((event) => { configurationUpdated(event); });
 
 	statusBar.initialize(context);
+
+	const sdpSearchPaths = vscode.workspace.getConfiguration('qConn').get<string[]>('sdpSearchPaths');
+	if (sdpSearchPaths) {
+		startFindSDPPaths(sdpSearchPaths);
+	}
 }
 
 export function deactivate() {

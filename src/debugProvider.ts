@@ -1,14 +1,14 @@
 import * as vscode from 'vscode';
-import { ElfFileReader } from './elfParser';
 import * as path from 'path';
 import { log } from './outputChannel';
-import { fdir } from 'fdir';
 import { fileExists } from './util';
-import { getGDBPathFromSDP, getDependenciesOfCoreFile, resolveDependencies } from './debug';
+import { getQNXVersionOfElf, QNXVersion } from './debug';
+import { getDependenciesOfElf, resolveDependencies } from './debugResolvers';
+import * as sdpPaths from './sdpPaths';
 
 let toolsDir: string;
 
-interface CoreDebugConfiguration extends vscode.DebugConfiguration
+export interface CoreDebugConfiguration extends vscode.DebugConfiguration
 {
     coreDumpPath?: string;
     program?: string;
@@ -16,7 +16,7 @@ interface CoreDebugConfiguration extends vscode.DebugConfiguration
     miDebuggerPath?: string
 };
 
-class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
+export class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvider {
     public resolveDebugConfiguration(folder: vscode.WorkspaceFolder | undefined, debugConfiguration: CoreDebugConfiguration, token?: vscode.CancellationToken): vscode.ProviderResult<vscode.DebugConfiguration>
     {
         return debugConfiguration;
@@ -34,54 +34,40 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
         debugConfiguration.MIMode = "gdb";
 
         if (!debugConfiguration.miDebuggerPath) {
-            let gdbPath: string = "";
-            if (await fileExists(getGDBPathFromSDP(vscode.workspace.getConfiguration("qConn").get<string>("sdpPath", "")))) {
-                gdbPath = getGDBPathFromSDP(vscode.workspace.getConfiguration("qConn").get<string>("sdpPath", ""));
-            } else if (process.env.QNX_HOST && await fileExists(getGDBPathFromSDP(process.env.QNX_HOST))) {
-                gdbPath = getGDBPathFromSDP(process.env.QNX_HOST);
-            } else {
-                const sdpPaths = await vscode.window.showOpenDialog({
-                    canSelectFolders: true,
-                    canSelectFiles: false,
-                    canSelectMany: false,
-                    title: "Select SDP path"
-                });
-                if (sdpPaths?.length === 1) {
-                    gdbPath = getGDBPathFromSDP(sdpPaths[0].fsPath);
+            let sdpPath = await sdpPaths.getQNX70SDPPath();
+            if (!sdpPath) {
+                const options = [`Open user settings`, `Open workspace settings`];
+                const result = await vscode.window.showErrorMessage(`Unable to find sdp at ${sdpPath}. Have you set your SDP path correctly?`, ...options);
+                if (result === options[0]) {
+                    vscode.commands.executeCommand("workbench.action.openSettings", "qconn.sdpSearchPaths");
+                } else if (result === options[1]) {
+                    vscode.commands.executeCommand("workbench.action.openWorkspaceSettings", "qconn.sdpSearchPaths");
                 }
+                return undefined;
             }
-            if (!(await fileExists(gdbPath))) {
-                vscode.window.showErrorMessage(`Unable to find gdb at ${gdbPath}. Please set the configuration qConn.sdpPath to the path of your QNX sdp`);
-            } else {
-                log(`Found debugger at ${gdbPath}`);
-                debugConfiguration.miDebuggerPath = gdbPath;
+            const gdbPath = await sdpPaths.getGDBPath();
+            if (!gdbPath || !(await fileExists(gdbPath))) {
+                vscode.window.showErrorMessage(`Unable to find gdb at ${gdbPath}. Please set the configuration qConn.sdpSearchPaths to the path of your QNX sdp`);
+                return undefined;
             }
+            debugConfiguration.miDebuggerPath = gdbPath;
         }
 
-        const linkMap = (await getDependenciesOfCoreFile(debugConfiguration.coreDumpPath));
+        const dependencies = await getDependenciesOfElf(debugConfiguration.coreDumpPath);
 
         // Try to resolve program
         if (!debugConfiguration.program) {
-            if (vscode.workspace.workspaceFolders) {
-                const programInfo = linkMap.filter(link => link.soName === 'PIE')[0];
-                const buildId = programInfo.buildid;
-                const fileName = path.basename(programInfo.path);
-                const candidates = await (new fdir()
-                    .withBasePath()
-                    .filter(p => path.basename(p) === fileName)
-                    .crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
-                log(`Program candidates are: ${candidates}`);
-                const candidateBuildIds = await Promise.all(candidates.map(async path => { 
-                    const buildId = await new ElfFileReader().getBuildID(path);
-                    return { path, buildId };
-                }));
-                const candidatesWithMatchingBuildIds = candidateBuildIds.filter(candidate => candidate.buildId === buildId);
-                const uniqueMatches = candidatesWithMatchingBuildIds.filter((a, index) => candidatesWithMatchingBuildIds.findIndex(b => a.path === b.path) === index);
-                if (uniqueMatches.length !== 0) {
-                    debugConfiguration.program = uniqueMatches[0].path;
+            if (vscode.workspace.workspaceFolders && dependencies) {
+                const programName = path.parse(debugConfiguration.coreDumpPath).name;
+                let programDependency = dependencies.filter(link => link.soName === 'PIE')[0];
+                programDependency.soName = programName;
+                log(`Resolving program ${programName}`);
+                const resolvedProgram = await resolveDependencies([programDependency], [vscode.workspace.workspaceFolders[0].uri.fsPath]);
+                if (resolvedProgram.length !== 0) {
+                    debugConfiguration.program = resolvedProgram[0];
                     log(`Resolved program at ${debugConfiguration.program}`);
                 } else {
-                    vscode.window.showWarningMessage(`Could not find program ${fileName} with build ID ${buildId}.\nYou can manually set the program path if you want to load this file regardless.`);
+                    vscode.window.showWarningMessage(`Could not find program ${programName} with build ID ${programDependency.buildid}.\nYou must manually add a launch configuration and set the program path.`);
                 }
             }
         }
@@ -92,11 +78,23 @@ class CoreDebugConfigurationProvider implements vscode.DebugConfigurationProvide
 
         // Try to resolve additional .so lib paths
         if (!debugConfiguration.additionalSOLibSearchPath) {
-            const dependencies = linkMap.filter(link => link.soName !== 'PIE');
-            const resolvedDependencies = await resolveDependencies(dependencies);
-            const pathsToUniqueCandidates = resolvedDependencies.map(resolvedDependency => path.dirname(resolvedDependency));
-            log(`Resolved SO libs paths are ${pathsToUniqueCandidates}`);
-                debugConfiguration.additionalSOLibSearchPath = pathsToUniqueCandidates.join(";");
+            if (vscode.workspace.workspaceFolders && dependencies) {
+                log(`Resolving shared library dependencies`);
+                const soLibDependencies = dependencies.filter(link => link.soName !== 'PIE');
+
+                let searchPaths = [vscode.workspace.workspaceFolders[0].uri.fsPath];
+                if (debugConfiguration.program) {
+                    const qnxVersion = await getQNXVersionOfElf(debugConfiguration.program);
+                    const sdpPath = await (qnxVersion === QNXVersion.QNX70 ? sdpPaths.getQNX70SDPPath() : sdpPaths.getQNX71SDPPath());
+                    if (sdpPath) {
+                        searchPaths.push(path.join(sdpPath));
+                    }
+                }
+                log(`Searching ${searchPaths} for ${JSON.stringify(soLibDependencies)}`);
+                const resolvedDependencies = await resolveDependencies(soLibDependencies, searchPaths);
+                log(`Resolved SO libs paths are ${resolvedDependencies}`);
+                debugConfiguration.additionalSOLibSearchPath = resolvedDependencies.map(p => path.dirname(p)).join(";");
+            }
         }
 
         log(`Final debug configuration is ${JSON.stringify(debugConfiguration)}`);

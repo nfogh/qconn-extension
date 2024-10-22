@@ -1,69 +1,27 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { fdir } from 'fdir';
-import { fileExists, unique } from './util';
-import { ElfFileReader } from './elfParser';
+import { fileExists } from './util';
 import * as outputChannel from './outputChannel';
+import { getDependenciesOfElf, resolveDependencies } from './debugResolvers';
+import { ElfFileReader } from './elfParser';
+import * as sdpPaths from './sdpPaths';
 
-interface Dependency {
-	path: string;
-	soName: string;
-	buildid: string;
-}
+export enum QNXVersion {
+	QNX70 = 70,
+	QNX71 = 71
+};
 
-export async function getDependenciesOfElfFile(elfFilePath: string): Promise<string[] | undefined> {
-	return new ElfFileReader().getNeededLibs(elfFilePath);
-}
-
-export async function getDependenciesOfCoreFile(coreFilePath: string): Promise<Dependency[]> {
-	const elfFileReader = new ElfFileReader();
-	const linkMaps = await elfFileReader.getLinkMap(coreFilePath);
-	return linkMaps.map(map => { return { path: map.path, soName: map.soName, buildid: map.buildid }; });
-}
-
-export function getGDBPathFromSDP(sdpPath: string): string {
-	if (process.platform === "win32") {
-		return path.join(sdpPath, "usr", "bin", "ntox86_64-gdb.exe");
-	} else {
-		return path.join(sdpPath, "usr", "bin", "ntox86_64-gdb");
+export async function getQNXVersionOfElf(elfFilePath: string): Promise<QNXVersion | undefined> {
+	const commentSection = await new ElfFileReader().getCommentSection(elfFilePath);
+	if (commentSection) {
+		if (commentSection.includes("qnx700")) {
+			return QNXVersion.QNX70;
+		} else if (commentSection.includes("qnx710")) {
+			return QNXVersion.QNX71;
+		}
 	}
-}
-
-export async function resolveElfFileDependencies(dependencies: string[]): Promise<string[]> {
-	if (vscode.workspace.workspaceFolders) {
-		const candidates = await (new fdir()
-			.withBasePath()
-			.filter(p => dependencies.includes(path.basename(p)))
-			.crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
-		outputChannel.log(`SO lib candidates are: ${candidates}`);
-		return candidates;
-	}
-	return [];
-}
-
-export async function resolveDependencies(dependencies: Dependency[]): Promise<string[]> {
-	const dependencyBuildIDs = new Map(dependencies.map(dependency => [dependency.soName, dependency.buildid]));
-	const dependencyBaseNames = dependencies.map(dependency => dependency.soName);
-
-	// find all candidates
-	if (vscode.workspace.workspaceFolders) {
-		const candidates = await (new fdir()
-			.withBasePath()
-			.filter(p => dependencyBaseNames.includes(path.basename(p)))
-			.crawl(vscode.workspace.workspaceFolders[0].uri.fsPath).withPromise());
-		outputChannel.log(`SO lib candidates are: ${candidates}`);
-
-		const candidateBuildIds = await Promise.all(candidates.map(async path => {
-			const buildId = await new ElfFileReader().getBuildID(path);
-			return { path, buildId };
-		}));
-
-		const candidatesWithMatchingBuildIds = candidateBuildIds
-			.filter(candidate => candidate.buildId === dependencyBuildIDs.get(candidate.path))
-			.map(elem => elem.path);
-		return candidatesWithMatchingBuildIds.filter(unique);
-	}
-	return [];
+	return undefined;
 }
 
 export async function debug(qnxPath: string, qConnTargetHost: string, qConnTargetPort: number): Promise<void> {
@@ -72,10 +30,15 @@ export async function debug(qnxPath: string, qConnTargetHost: string, qConnTarge
 		return;
 	}
 
-	const sdpPath = vscode.workspace.getConfiguration("qConn").get<string>("sdpPath", "");
-	const gdbPath = getGDBPathFromSDP(sdpPath);
-	if (!await fileExists(gdbPath)) {
-		vscode.window.showWarningMessage(`Unable to find gdb in SDP ${sdpPath}. Have you set your SDP path correctly?`);
+	const gdbPath = await sdpPaths.getGDBPath();
+	if (!gdbPath || !await fileExists(gdbPath)) {
+		const options = [`Open user settings`, `Open workspace settings`];
+		const result = await vscode.window.showErrorMessage(`Unable to find gdb at ${gdbPath}. Have you set your SDP path correctly?`, ...options);
+		if (result === options[0]) {
+			vscode.commands.executeCommand("workbench.action.openSettings", "qconn.sdpSearchPaths");
+		} else if (result === options[1]) {
+			vscode.commands.executeCommand("workbench.action.openWorkspaceSettings", "qconn.sdpSearchPaths");
+		}
 		return;
 	}
 
@@ -88,7 +51,7 @@ export async function debug(qnxPath: string, qConnTargetHost: string, qConnTarge
 		.withPromise();
 
 	if (executableMatches.length === 0) {
-		vscode.window.showWarningMessage(`Unable to find ${executableName} in ${vscode.workspace.workspaceFolders[0]}`);
+		vscode.window.showWarningMessage(`Unable to find ${executableName} in ${vscode.workspace.workspaceFolders[0].uri}`);
 		return;
 	}
 
@@ -96,21 +59,54 @@ export async function debug(qnxPath: string, qConnTargetHost: string, qConnTarge
 	const programPosixPath = programPath.replaceAll(path.sep, path["posix"].sep);
 	const gdbPosixPath = gdbPath.replaceAll(path.sep, path["posix"].sep);
 
+	outputChannel.log(`Getting dependencies of ${programPath}`);
+	const dependencies = await getDependenciesOfElf(programPath);
+	outputChannel.log(`Dependencies are ${dependencies?.map(dep => dep.soName + "(" + (dep.buildid ?? "unknown build ID") + ")")}`);
+	let additionalSOLibSearchPath = "";
+	if (dependencies) {
+		let searchPaths = [vscode.workspace.workspaceFolders[0].uri.fsPath];
+
+		const qnxVersion = await getQNXVersionOfElf(programPath);
+		outputChannel.log(`${programPath} was built for ${qnxVersion}`);
+		if (qnxVersion === QNXVersion.QNX70) {
+			const qnx70SDPPath = await sdpPaths.getQNX70SDPPath();
+			if (qnx70SDPPath) {
+				searchPaths = [...searchPaths, qnx70SDPPath];
+			}
+		}
+		if (qnxVersion === QNXVersion.QNX71) {
+			const qnx71SDPPath = await sdpPaths.getQNX71SDPPath();
+			if (qnx71SDPPath) {
+				searchPaths = [...searchPaths, qnx71SDPPath];
+			}
+		}
+
+		const additionalSOLibSearchPaths = vscode.workspace.getConfiguration("qConn").get<string[]>("additionalSOLibSearchPaths");
+		if (additionalSOLibSearchPaths) {
+			searchPaths = [...searchPaths, ...additionalSOLibSearchPaths];
+		}
+		outputChannel.log(`Searching ${searchPaths}`);
+		const resolvedDependencies = await resolveDependencies(dependencies, searchPaths);
+		outputChannel.log(`Resolved dependencies are ${resolvedDependencies}`);
+		additionalSOLibSearchPath = resolvedDependencies.map(p => path.dirname(p)).join(";");
+	}
+
 	const configuration = {
 		type: "cppdbg",
 		name: "QNX launch " + qnxPath,
 		request: "launch",
 		program: programPosixPath,
-		cwd: ".",
+		cwd: path.dirname(programPath),
 		MIMode: "gdb",
 		miDebuggerPath: gdbPosixPath,
 		externalConsole: "false",
+		additionalSOLibSearchPath: additionalSOLibSearchPath,
 		launchCompleteCommand: "exec-run",
 		targetArchitecture: "x86_64", // Figure out this dynamically
 		customLaunchSetupCommands: [
 			{ text: `target qnx ${qConnTargetHost}:${qConnTargetPort}` },
 			{ text: `set nto-cwd ${path.dirname(qnxPath)}` },
-			{ text: `file ${programPath}` },
+			{ text: `file ${programPosixPath}` },
 			{ text: `set nto-executable ${qnxPath}` }
 		]
 	};
@@ -119,6 +115,9 @@ export async function debug(qnxPath: string, qConnTargetHost: string, qConnTarge
 }
 
 export async function attach(pid: number, qnxPath: string, qConnTargetHost: string, qConnTargetPort: number): Promise<void> {
+	// TODO: Get the dependencies of the executable on-target.
+	// We could spawn a shell and use pidin -p pid -F %O to get the list of shared libraries
+	// file can be used to get the buildID of the libraries
 	if (!vscode.workspace.workspaceFolders) {
 		return;
 	}
@@ -139,18 +138,45 @@ export async function attach(pid: number, qnxPath: string, qConnTargetHost: stri
 	const programPath = executableMatches[0];
 
 	outputChannel.log(`Getting dependencies of ${programPath}`);
-	const dependencies = await getDependenciesOfElfFile(programPath);
-	outputChannel.log(`Got ${dependencies}`);
+	const dependencies = await getDependenciesOfElf(programPath);
+	outputChannel.log(`Dependencies are ${dependencies?.map(dep => dep.soName + "(" + (dep.buildid ?? "unknown build ID") + ")")}`);
 	let additionalSOLibSearchPath = "";
 	if (dependencies) {
-		const resolvedDependencies = await resolveElfFileDependencies(dependencies);
+		let searchPaths = [vscode.workspace.workspaceFolders[0].uri.fsPath];
+		const qnxVersion = await getQNXVersionOfElf(programPath);
+		outputChannel.log(`${programPath} was built for ${qnxVersion}`);
+		if (qnxVersion === QNXVersion.QNX70) {
+			const qnx70SDPPath = await sdpPaths.getQNX70SDPPath();
+			if (qnx70SDPPath) {
+				searchPaths = [...searchPaths, qnx70SDPPath];
+			}
+		}
+		if (qnxVersion === QNXVersion.QNX71) {
+			const qnx71SDPPath = await sdpPaths.getQNX71SDPPath();
+			if (qnx71SDPPath) {
+				searchPaths = [...searchPaths, qnx71SDPPath];
+			}
+		}
+
+		const additionalSOLibSearchPaths = vscode.workspace.getConfiguration("qConn").get<string[]>("additionalSOLibSearchPaths");
+		if (additionalSOLibSearchPaths) {
+			searchPaths = [...searchPaths, ...additionalSOLibSearchPaths];
+		}
+		outputChannel.log(`Searching for dependencies in ${searchPaths}`);
+		const resolvedDependencies = await resolveDependencies(dependencies, searchPaths);
+		outputChannel.log(`Resolved dependencies are ${resolvedDependencies}`);
 		additionalSOLibSearchPath = resolvedDependencies.map(p => path.dirname(p)).join(";");
 	}
 
-	const sdpPath = vscode.workspace.getConfiguration("qConn").get<string>("sdpPath", "");
-	const gdbPath = getGDBPathFromSDP(sdpPath);
-	if (!await fileExists(gdbPath)) {
-		vscode.window.showWarningMessage(`Unable to find gdb in SDP ${sdpPath}. Have you set your SDP path correctly?`);
+	const gdbPath = await sdpPaths.getGDBPath();
+	if (!gdbPath || !await fileExists(gdbPath)) {
+		const options = [`Open user settings`, `Open workspace settings`];
+		const result = await vscode.window.showErrorMessage(`Unable to find gdb at ${gdbPath}. Have you set your SDP path correctly?`, ...options);
+		if (result === options[0]) {
+			vscode.commands.executeCommand("workbench.action.openSettings", "qconn.sdpSearchPaths");
+		} else if (result === options[1]) {
+			vscode.commands.executeCommand("workbench.action.openWorkspaceSettings", "qconn.sdpSearchPaths");
+		}
 		return;
 	}
 
@@ -162,7 +188,7 @@ export async function attach(pid: number, qnxPath: string, qConnTargetHost: stri
 		name: `QNX Attach ${qnxPath} (${pid})`,
 		request: "launch",
 		program: programPosixPath,
-		cwd: ".",
+		cwd: path.dirname(programPath),
 		MIMode: "gdb",
 		miDebuggerPath: gdbPosixPath,
 		externalConsole: "false",

@@ -2,7 +2,7 @@
   "name": "qconn-extension",
   "displayName": "QNX qconn Extension",
   "description": "QNX target file system browser, process explorer and terminal in vs code",
-  "version": "1.3.4",
+  "version": "2.0.0",
   "icon": "resources/icon.png",
   "publisher": "NikolajFogh",
   "engines": {
@@ -24,9 +24,21 @@
     "configuration": {
       "title": "QConn",
       "properties": {
-        "qConn.sdpPath": {
-          "type": "string",
-          "description": "The path to your QNX SDP. Needed for debugging."
+        "qConn.sdpSearchPaths": {
+          "type": "array",
+          "description": "Paths to search for your QNX SDP. Needed for debugging. You don't need to set exact paths. The extension will search subdirectories automatically.",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "qConn.additionalSOLibSearchPaths": {
+          "type": "array",
+          "description": "Paths to search for additional SO libs. Subdirectories are also searched.",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
         },
         "qConn.target.host": {
           "type": "string",
@@ -61,8 +73,13 @@
       },
       {
         "command": "qconn.kill",
-        "title": "Kill QNX Process",
-        "shortTitle": "Kill"
+        "title": "Send SIGKILL to QNX Process",
+        "shortTitle": "Send SIGKILL"
+      },
+      {
+        "command": "qconn.sigint",
+        "title": "Send SIGINT to QNX Process",
+        "shortTitle": "Send SIGINT"
       },
       {
         "command": "qconn.attach",
@@ -73,6 +90,11 @@
         "command": "qconn.debug",
         "title": "Debug QNX executable",
         "shortTitle": "Debug"
+      },
+      {
+        "command": "qconn.debug_corefile",
+        "title": "Debug QNX core file",
+        "shortTitle": "Debug Core"
       },
       {
         "command": "qconn.connectFs",
@@ -100,8 +122,8 @@
         "title": "Delete"
       },
       {
-        "command": "qconnFileExplorer.copyFile",
-        "title": "Copy file to host"
+        "command": "qconnFileExplorer.copyToHost",
+        "title": "Copy to host"
       },
       {
         "command": "qconnFileExplorer.renameFile",
@@ -153,6 +175,10 @@
           "when": "view == qConnProcessView && viewItem == ProcessID"
         },
         {
+          "command": "qconn.sigint",
+          "when": "view == qConnProcessView && viewItem == ProcessID"
+        },
+        {
           "command": "qconn.attach",
           "when": "view == qConnProcessView && viewItem == ProcessID"
         },
@@ -161,16 +187,20 @@
           "when": "view == qConnFileExplorer && viewItem == file"
         },
         {
+          "command": "qconn.debug_corefile",
+          "when": "view == qConnFileExplorer && viewItem == coredump"
+        },
+        {
           "command": "qconnFileExplorer.deleteFile",
           "when": "view == qConnFileExplorer"
         },
         {
-          "command": "qconnFileExplorer.copyFile",
-          "when": "view == qConnFileExplorer && viewItem == file"
+          "command": "qconnFileExplorer.copyToHost",
+          "when": "view == qConnFileExplorer"
         },
         {
           "command": "qconnFileExplorer.renameFile",
-          "when": "view == qConnFileExplorer && viewItem == file"
+          "when": "view == qConnFileExplorer"
         },
         {
           "command": "qconnFileExplorer.createFile",
@@ -312,5 +342,8 @@
     "fdir": "^6.4.0",
     "node-bufferreader": "^1.0.1",
     "qconn": "^1.1.3"
-  }
+  },
+  "extensionDependencies": [
+    "ms-vscode.cpptools"
+  ]
 }

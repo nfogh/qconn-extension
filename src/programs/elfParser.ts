@@ -1,4 +1,5 @@
-import * as elfParser from '../elfParser';
+//import * as elfParser from '../elfParser';
+import * as debugResolvers from '../debugResolvers';
 
 async function main(): Promise<void> {
 
@@ -11,9 +12,13 @@ const elfFilePath = process.argv[2];
 
 console.log(`Parsing ${elfFilePath}\n`);
 
-const elfFileReader = new elfParser.ElfFileReader();
-console.log(await elfFileReader.getNeededLibs(elfFilePath));
-
+    const dependencies = await debugResolvers.getDependenciesOfElf(elfFilePath);
+    if (dependencies) {
+        const resolvedDependencies = await debugResolvers.resolveDependencies(dependencies, [""]);
+        console.log(`Resolved dependencies\n${resolvedDependencies}`);
+    } else {
+        console.log(`Could not find dependencies in ${elfFilePath}`);
+    }
 }
 
 if (require.main === module) {

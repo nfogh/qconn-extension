@@ -4,7 +4,7 @@ import * as net from 'net';
 type CallbackType = (data: Buffer, error: any | undefined) => void;
 
 class PacketizedSocket {
-    private socket: net.Socket;
+    private readonly socket: net.Socket;
     private endOfPacket: Buffer | number = Buffer.alloc(0);
     private callback: CallbackType | undefined;
     private receiveBuffer: Buffer = Buffer.alloc(0);

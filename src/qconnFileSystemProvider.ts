@@ -39,7 +39,7 @@ interface SynchronizedService {
 
 export class QConnFileSystemProvider implements vscode.FileSystemProvider {
 	// Holds a map from an authority to a service and a mutex to synchronize access to it
-	private services: Map<string, SynchronizedService> = new Map();
+	private readonly services: Map<string, SynchronizedService> = new Map();
 
 	// Gets a service for a given authority, creating it if it doesn't exist
 	async getService(authority: string): Promise<SynchronizedService> {
