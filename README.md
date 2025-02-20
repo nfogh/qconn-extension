@@ -1,3 +1,9 @@
+# Looking for maintainer
+
+This project is looking for a maintainer. Since I am no longer actively involved
+in projects using QNX, I don't have much time to allocate to this project. Please
+create an issue in the issue tracker if you would like to take over the project.
+
 # QNX QConn Extension README
 
 Although QNX has released an official extension for VS Code (QNX Toolkit), that
